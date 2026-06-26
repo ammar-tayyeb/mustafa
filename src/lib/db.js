@@ -1,10 +1,112 @@
-import Database from "@tauri-apps/plugin-sql";
-
 let _db = null;
+
+const fallbackDb = {
+  async select() {
+    return [];
+  },
+  async execute() {
+    return { lastInsertId: null, changes: 0 };
+  },
+};
+
+const FALLBACK_STORE_KEY = "warehouse_fallback_store";
+
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function getFallbackStore() {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") {
+    return { traders: [], vehicles: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+  }
+
+  try {
+    const raw = localStorage.getItem(FALLBACK_STORE_KEY);
+    if (!raw) {
+      const initial = { traders: [], vehicles: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+      localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(initial));
+      return initial;
+    }
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn("Unable to read fallback store, resetting it.", error);
+    const initial = { traders: [], vehicles: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+    localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(initial));
+    return initial;
+  }
+}
+
+function persistFallbackStore(store) {
+  if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+    localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(store));
+  }
+}
+
+function ensureFallbackStore() {
+  const store = getFallbackStore();
+  store.traders ??= [];
+  store.vehicles ??= [];
+  store.drivers ??= [];
+  store.invoices ??= [];
+  store.invoice_items ??= [];
+  store.payments ??= [];
+  store.transactions_log ??= [];
+  store.settings ??= {};
+  return store;
+}
+
+function getFallbackRecords(table) {
+  const store = ensureFallbackStore();
+  return (store[table] || []).map(item => cloneData(item));
+}
+
+function saveFallbackRecords(table, rows) {
+  const store = ensureFallbackStore();
+  store[table] = rows;
+  persistFallbackStore(store);
+}
+
+function getFallbackRecordById(table, id) {
+  return getFallbackRecords(table).find(item => item.id === id) ?? null;
+}
+
+function updateFallbackRecord(table, id, updater) {
+  const store = ensureFallbackStore();
+  const rows = store[table] || [];
+  const index = rows.findIndex(item => item.id === id);
+  if (index === -1) return null;
+  rows[index] = { ...rows[index], ...updater(rows[index]) };
+  store[table] = rows;
+  persistFallbackStore(store);
+  return cloneData(rows[index]);
+}
+
+function pushFallbackRecord(table, row) {
+  const store = ensureFallbackStore();
+  store[table] = store[table] || [];
+  store[table].push(cloneData(row));
+  persistFallbackStore(store);
+  return cloneData(row);
+}
+
+export function isTauriRuntime() {
+  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+}
 
 export async function getDb() {
   if (!_db) {
-    _db = await Database.load("sqlite:warehouse.db");
+    if (!isTauriRuntime()) {
+      _db = fallbackDb;
+      return _db;
+    }
+
+    try {
+      const Database = (await import("@tauri-apps/plugin-sql")).default;
+      _db = await Database.load("sqlite:warehouse.db");
+    } catch (error) {
+      console.warn("Falling back to local browser storage because the Tauri runtime is unavailable:", error);
+      _db = fallbackDb;
+    }
   }
   return _db;
 }
@@ -23,11 +125,21 @@ export function today() {
 
 // ─── Traders ────────────────────────────────────────────────────────────────
 export async function getTraders() {
+  if (!isTauriRuntime()) {
+    return getFallbackRecords("traders").filter(item => item.is_deleted !== 1).sort((a, b) => a.name.localeCompare(b.name));
+  }
   const db = await getDb();
   return db.select("SELECT * FROM traders WHERE is_deleted=0 ORDER BY name");
 }
 
 export async function createTrader({ name, phone = null, address = null, notes = null }) {
+  if (!isTauriRuntime()) {
+    const store = ensureFallbackStore();
+    const id = uuid(); const ts = now();
+    store.traders.push({ id, name, phone, address, notes, debt_fils: 0, is_deleted: 0, created_at: ts, updated_at: ts });
+    persistFallbackStore(store);
+    return id;
+  }
   const db = await getDb();
   const id = uuid(); const ts = now();
   await db.execute(
@@ -38,6 +150,17 @@ export async function createTrader({ name, phone = null, address = null, notes =
 }
 
 export async function updateTrader(id, fields) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("traders", id, row => ({
+      ...row,
+      name: fields.name,
+      phone: fields.phone ?? null,
+      address: fields.address ?? null,
+      notes: fields.notes ?? null,
+      updated_at: now(),
+    }));
+    return;
+  }
   const db = await getDb();
   await db.execute(
     "UPDATE traders SET name=?, phone=?, address=?, notes=?, updated_at=? WHERE id=?",
@@ -46,17 +169,31 @@ export async function updateTrader(id, fields) {
 }
 
 export async function deleteTrader(id) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("traders", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute("UPDATE traders SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
 }
 
 // ─── Vehicles ───────────────────────────────────────────────────────────────
 export async function getVehicles() {
+  if (!isTauriRuntime()) {
+    return getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).sort((a, b) => a.plate.localeCompare(b.plate));
+  }
   const db = await getDb();
   return db.select("SELECT * FROM vehicles WHERE is_deleted=0 ORDER BY plate");
 }
 
 export async function createVehicle({ plate, type = null, notes = null }) {
+  if (!isTauriRuntime()) {
+    const store = ensureFallbackStore();
+    const id = uuid(); const ts = now();
+    store.vehicles.push({ id, plate, type, notes, is_deleted: 0, created_at: ts, updated_at: ts });
+    persistFallbackStore(store);
+    return id;
+  }
   const db = await getDb();
   const id = uuid(); const ts = now();
   await db.execute(
@@ -67,6 +204,10 @@ export async function createVehicle({ plate, type = null, notes = null }) {
 }
 
 export async function updateVehicle(id, fields) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("vehicles", id, row => ({ ...row, plate: fields.plate, type: fields.type ?? null, notes: fields.notes ?? null, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute(
     "UPDATE vehicles SET plate=?, type=?, notes=?, updated_at=? WHERE id=?",
@@ -75,12 +216,21 @@ export async function updateVehicle(id, fields) {
 }
 
 export async function deleteVehicle(id) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("vehicles", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute("UPDATE vehicles SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
 }
 
 // ─── Drivers ────────────────────────────────────────────────────────────────
 export async function getDrivers() {
+  if (!isTauriRuntime()) {
+    const drivers = getFallbackRecords("drivers").filter(item => item.is_deleted !== 1);
+    const vehicles = new Map(getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    return drivers.map(driver => ({ ...driver, vehicle_plate: vehicles.get(driver.vehicle_id)?.plate ?? null })).sort((a, b) => a.name.localeCompare(b.name));
+  }
   const db = await getDb();
   return db.select(`
     SELECT d.*, v.plate as vehicle_plate
@@ -91,6 +241,13 @@ export async function getDrivers() {
 }
 
 export async function createDriver({ name, phone = null, vehicle_id = null, notes = null }) {
+  if (!isTauriRuntime()) {
+    const store = ensureFallbackStore();
+    const id = uuid(); const ts = now();
+    store.drivers.push({ id, name, phone, vehicle_id, notes, is_deleted: 0, created_at: ts, updated_at: ts });
+    persistFallbackStore(store);
+    return id;
+  }
   const db = await getDb();
   const id = uuid(); const ts = now();
   await db.execute(
@@ -101,6 +258,10 @@ export async function createDriver({ name, phone = null, vehicle_id = null, note
 }
 
 export async function updateDriver(id, fields) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("drivers", id, row => ({ ...row, name: fields.name, phone: fields.phone ?? null, vehicle_id: fields.vehicle_id ?? null, notes: fields.notes ?? null, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute(
     "UPDATE drivers SET name=?, phone=?, vehicle_id=?, notes=?, updated_at=? WHERE id=?",
@@ -109,12 +270,34 @@ export async function updateDriver(id, fields) {
 }
 
 export async function deleteDriver(id) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("drivers", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute("UPDATE drivers SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
 }
 
 // ─── Invoices ───────────────────────────────────────────────────────────────
 export async function getInvoices({ from = null, to = null, status = null, trader_id = null } = {}) {
+  if (!isTauriRuntime()) {
+    const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    const drivers = new Map(getFallbackRecords("drivers").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    const vehicles = new Map(getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    return getFallbackRecords("invoices")
+      .filter(item => item.is_deleted !== 1)
+      .filter(item => !from || item.date >= from)
+      .filter(item => !to || item.date <= to)
+      .filter(item => !status || item.status === status)
+      .filter(item => !trader_id || item.trader_id === trader_id)
+      .map(item => ({
+        ...item,
+        trader_name: traders.get(item.trader_id)?.name ?? null,
+        driver_name: drivers.get(item.driver_id)?.name ?? null,
+        vehicle_plate: vehicles.get(item.vehicle_id)?.plate ?? null,
+      }))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.created_at || "").localeCompare(a.created_at || ""));
+  }
   const db = await getDb();
   let where = "i.is_deleted=0";
   const params = [];
@@ -133,6 +316,14 @@ export async function getInvoices({ from = null, to = null, status = null, trade
 }
 
 export async function getInvoice(id) {
+  if (!isTauriRuntime()) {
+    const invoice = getFallbackRecords("invoices").find(item => item.id === id && item.is_deleted !== 1);
+    if (!invoice) return null;
+    const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    const drivers = new Map(getFallbackRecords("drivers").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    const vehicles = new Map(getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    return { ...invoice, trader_name: traders.get(invoice.trader_id)?.name ?? null, driver_name: drivers.get(invoice.driver_id)?.name ?? null, vehicle_plate: vehicles.get(invoice.vehicle_id)?.plate ?? null };
+  }
   const db = await getDb();
   const rows = await db.select(`
     SELECT i.*, t.name as trader_name, d.name as driver_name, v.plate as vehicle_plate
@@ -146,17 +337,40 @@ export async function getInvoice(id) {
 }
 
 export async function createInvoice({ trader_id, driver_id = null, vehicle_id = null, date, notes = null }) {
+  if (!isTauriRuntime()) {
+    const id = uuid(); const ts = now();
+    pushFallbackRecord("invoices", {
+      id,
+      trader_id,
+      driver_id,
+      vehicle_id,
+      date,
+      status: "draft",
+      total_final: 0,
+      paid_amount: 0,
+      remaining: 0,
+      notes,
+      is_deleted: 0,
+      created_at: ts,
+      updated_at: ts,
+    });
+    return id;
+  }
   const db = await getDb();
   const id = uuid(); const ts = now();
   await db.execute(
     `INSERT INTO invoices (id, trader_id, driver_id, vehicle_id, date, status, total_final, paid_amount, remaining, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', 0, 0, 0, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, 'draft', 0, 0, 0, ?, ?, ?)` ,
     [id, trader_id, driver_id, vehicle_id, date, notes, ts, ts]
   );
   return id;
 }
 
 export async function updateInvoiceTotals(id, { total_final, paid_amount, remaining, notes = null }) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("invoices", id, row => ({ ...row, total_final, paid_amount, remaining, notes, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute(
     "UPDATE invoices SET total_final=?, paid_amount=?, remaining=?, notes=?, updated_at=? WHERE id=?",
@@ -166,6 +380,20 @@ export async function updateInvoiceTotals(id, { total_final, paid_amount, remain
 
 /** ترحيل الفاتورة: تغيير الحالة + إضافة الباقي لدين التاجر + تسجيل في سجل المعاملات */
 export async function postInvoice(invoiceId) {
+  if (!isTauriRuntime()) {
+    const ts = now();
+    const inv = await getInvoice(invoiceId);
+    if (!inv) throw new Error("الفاتورة غير موجودة");
+    if (inv.status === "posted") throw new Error("الفاتورة مُرحّلة مسبقاً");
+    updateFallbackRecord("invoices", invoiceId, row => ({ ...row, status: "posted", updated_at: ts }));
+    if (inv.remaining > 0 && inv.trader_id) {
+      updateFallbackRecord("traders", inv.trader_id, row => ({ ...row, debt_fils: Number(row.debt_fils || 0) + Number(inv.remaining || 0), updated_at: ts }));
+    }
+    pushFallbackRecord("transactions_log", {
+      id: uuid(), type: "invoice_posted", ref_id: invoiceId, trader_id: inv.trader_id, amount: inv.total_final, description: `ترحيل فاتورة — ${inv.trader_name ?? ""}`, date: inv.date, created_at: ts,
+    });
+    return;
+  }
   const db = await getDb();
   const ts = now();
   const inv = await getInvoice(invoiceId);
@@ -192,6 +420,20 @@ export async function postInvoice(invoiceId) {
 
 /** حركة عكسية للفاتورة المُرحّلة */
 export async function reverseInvoice(invoiceId) {
+  if (!isTauriRuntime()) {
+    const ts = now();
+    const inv = await getInvoice(invoiceId);
+    if (!inv) throw new Error("الفاتورة غير موجودة");
+    if (inv.status !== "posted") throw new Error("الفاتورة غير مُرحّلة");
+    updateFallbackRecord("invoices", invoiceId, row => ({ ...row, status: "draft", updated_at: ts }));
+    if (inv.remaining > 0 && inv.trader_id) {
+      updateFallbackRecord("traders", inv.trader_id, row => ({ ...row, debt_fils: Number(row.debt_fils || 0) - Number(inv.remaining || 0), updated_at: ts }));
+    }
+    pushFallbackRecord("transactions_log", {
+      id: uuid(), type: "reversal", ref_id: invoiceId, trader_id: inv.trader_id, amount: inv.total_final, description: `عكس فاتورة — ${inv.trader_name ?? ""}`, date: inv.date, created_at: ts,
+    });
+    return;
+  }
   const db = await getDb();
   const ts = now();
   const inv = await getInvoice(invoiceId);
@@ -216,12 +458,21 @@ export async function reverseInvoice(invoiceId) {
 }
 
 export async function deleteInvoice(id) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("invoices", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute("UPDATE invoices SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
 }
 
 // ─── Invoice Items ───────────────────────────────────────────────────────────
 export async function getInvoiceItems(invoice_id) {
+  if (!isTauriRuntime()) {
+    return getFallbackRecords("invoice_items")
+      .filter(item => item.invoice_id === invoice_id && item.is_deleted !== 1)
+      .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+  }
   const db = await getDb();
   return db.select(
     "SELECT * FROM invoice_items WHERE invoice_id=? AND is_deleted=0 ORDER BY created_at",
@@ -230,6 +481,51 @@ export async function getInvoiceItems(invoice_id) {
 }
 
 export async function upsertInvoiceItem(item) {
+  if (!isTauriRuntime()) {
+    const ts = now();
+    const id = item.id ?? uuid();
+    const existing = getFallbackRecords("invoice_items").find(row => row.id === id);
+    if (existing) {
+      updateFallbackRecord("invoice_items", id, row => ({
+        ...row,
+        invoice_id: item.invoice_id,
+        product_name: item.product_name,
+        gross_weight: item.gross_weight,
+        basket_count: item.basket_count,
+        basket_weight_each: item.basket_weight_each ?? 50,
+        net_weight: item.net_weight,
+        price: item.price,
+        amount_before: item.amount_before,
+        commission_rate: item.commission_rate,
+        commission_value: item.commission_value,
+        amount_after_comm: item.amount_after_comm,
+        porterage: item.porterage,
+        final_amount: item.final_amount,
+        updated_at: ts,
+      }));
+    } else {
+      pushFallbackRecord("invoice_items", {
+        id,
+        invoice_id: item.invoice_id,
+        product_name: item.product_name,
+        gross_weight: item.gross_weight,
+        basket_count: item.basket_count,
+        basket_weight_each: item.basket_weight_each ?? 50,
+        net_weight: item.net_weight,
+        price: item.price,
+        amount_before: item.amount_before,
+        commission_rate: item.commission_rate,
+        commission_value: item.commission_value,
+        amount_after_comm: item.amount_after_comm,
+        porterage: item.porterage,
+        final_amount: item.final_amount,
+        is_deleted: 0,
+        created_at: ts,
+        updated_at: ts,
+      });
+    }
+    return id;
+  }
   const db = await getDb();
   const ts = now();
   const id = item.id ?? uuid();
@@ -266,12 +562,24 @@ export async function upsertInvoiceItem(item) {
 }
 
 export async function deleteInvoiceItem(id) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("invoice_items", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
+    return;
+  }
   const db = await getDb();
   await db.execute("UPDATE invoice_items SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
 }
 
 // ─── Payments ───────────────────────────────────────────────────────────────
 export async function getPayments({ trader_id = null } = {}) {
+  if (!isTauriRuntime()) {
+    const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    return getFallbackRecords("payments")
+      .filter(item => item.is_deleted !== 1)
+      .filter(item => !trader_id || item.trader_id === trader_id)
+      .map(item => ({ ...item, trader_name: traders.get(item.trader_id)?.name ?? null }))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }
   const db = await getDb();
   let where = "p.is_deleted=0";
   const params = [];
@@ -285,6 +593,13 @@ export async function getPayments({ trader_id = null } = {}) {
 }
 
 export async function createPayment({ trader_id, amount, date, notes = null }) {
+  if (!isTauriRuntime()) {
+    const id = uuid(); const ts = now();
+    pushFallbackRecord("payments", { id, trader_id, amount, date, notes, is_deleted: 0, created_at: ts, updated_at: ts });
+    updateFallbackRecord("traders", trader_id, row => ({ ...row, debt_fils: Number(row.debt_fils || 0) - Number(amount || 0), updated_at: ts }));
+    pushFallbackRecord("transactions_log", { id: uuid(), type: "payment", ref_id: id, trader_id, amount, description: "دفعة تسوية دين", date, created_at: ts });
+    return id;
+  }
   const db = await getDb();
   const id = uuid(); const ts = now();
   await db.execute(
@@ -305,6 +620,17 @@ export async function createPayment({ trader_id, amount, date, notes = null }) {
 
 // ─── Transactions Log ────────────────────────────────────────────────────────
 export async function getTransactions({ from = null, to = null, trader_id = null } = {}) {
+  if (!isTauriRuntime()) {
+    const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    return getFallbackRecords("transactions_log")
+      .filter(item => item.is_deleted !== 1)
+      .filter(item => !from || item.date >= from)
+      .filter(item => !to || item.date <= to)
+      .filter(item => !trader_id || item.trader_id === trader_id)
+      .map(item => ({ ...item, trader_name: traders.get(item.trader_id)?.name ?? null }))
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+      .slice(0, 1000);
+  }
   const db = await getDb();
   let where = "tl.is_deleted=0";
   const params = [];
@@ -321,12 +647,22 @@ export async function getTransactions({ from = null, to = null, trader_id = null
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 export async function getSetting(key) {
+  if (!isTauriRuntime()) {
+    const store = ensureFallbackStore();
+    return store.settings?.[key] ?? null;
+  }
   const db = await getDb();
   const rows = await db.select("SELECT value FROM settings WHERE key=?", [key]);
   return rows[0]?.value ?? null;
 }
 
 export async function setSetting(key, value) {
+  if (!isTauriRuntime()) {
+    const store = ensureFallbackStore();
+    store.settings[key] = String(value);
+    persistFallbackStore(store);
+    return;
+  }
   const db = await getDb();
   await db.execute(
     "INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
@@ -335,6 +671,9 @@ export async function setSetting(key, value) {
 }
 
 export async function getAllSettings() {
+  if (!isTauriRuntime()) {
+    return { ...(ensureFallbackStore().settings || {}) };
+  }
   const db = await getDb();
   const rows = await db.select("SELECT key, value FROM settings");
   return Object.fromEntries(rows.map(r => [r.key, r.value]));
@@ -342,6 +681,38 @@ export async function getAllSettings() {
 
 // ─── Dashboard Stats ─────────────────────────────────────────────────────────
 export async function getDashboardStats({ from = null, to = null } = {}) {
+  if (!isTauriRuntime()) {
+    const traders = getFallbackRecords("traders").filter(item => item.is_deleted !== 1);
+    const invoices = getFallbackRecords("invoices").filter(item => item.is_deleted !== 1 && (!from || item.date >= from) && (!to || item.date <= to));
+    const postedInvoices = invoices.filter(item => item.status === "posted");
+    const invoiceItems = getFallbackRecords("invoice_items").filter(item => item.is_deleted !== 1);
+    const postedItems = invoiceItems.filter(item => postedInvoices.some(inv => inv.id === item.invoice_id));
+    const topDebtors = traders.filter(item => Number(item.debt_fils || 0) > 0).sort((a, b) => Number(b.debt_fils || 0) - Number(a.debt_fils || 0)).slice(0, 5);
+    const topProducts = postedItems.reduce((acc, item) => {
+      const key = item.product_name || "غير محدد";
+      acc[key] ??= { product_name: key, total_weight: 0, total_amount: 0 };
+      acc[key].total_weight += Number(item.net_weight || 0);
+      acc[key].total_amount += Number(item.final_amount || 0);
+      return acc;
+    }, {});
+    const salesByDay = Object.entries(postedInvoices.reduce((acc, inv) => {
+      acc[inv.date] = (acc[inv.date] || 0) + Number(inv.total_final || 0);
+      return acc;
+    }, {})).map(([date, total]) => ({ date, total })).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 30);
+
+    return {
+      tradersCount: traders.length,
+      totalSales: postedInvoices.reduce((s, inv) => s + Number(inv.total_final || 0), 0),
+      totalComm: postedItems.reduce((s, item) => s + Number(item.commission_value || 0), 0),
+      totalPort: postedItems.reduce((s, item) => s + Number(item.porterage || 0), 0),
+      totalDebt: traders.reduce((s, item) => s + Number(item.debt_fils || 0), 0),
+      draftCount: invoices.filter(item => item.status === "draft").length,
+      postedCount: postedInvoices.length,
+      topDebtors: topDebtors.map(item => ({ name: item.name, debt_fils: Number(item.debt_fils || 0) })),
+      topProducts: Object.values(topProducts).sort((a, b) => b.total_amount - a.total_amount).slice(0, 5),
+      salesByDay,
+    };
+  }
   const db = await getDb();
   let dateFilter = "";
   const p = [];

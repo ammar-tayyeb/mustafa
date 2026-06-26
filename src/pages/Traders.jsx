@@ -33,7 +33,7 @@ export default function Traders() {
       setError(null);
       setTraders(await getTraders());
     } catch (e) {
-      setError(e.message);
+      setError(e?.message || String(e) || "خطأ غير معروف");
     } finally {
       setLoading(false);
     }
@@ -63,7 +63,7 @@ export default function Traders() {
       setShowForm(false);
       await load();
     } catch (e) {
-      alert("خطأ: " + e.message);
+      alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف"));
     } finally {
       setSaving(false);
     }
@@ -76,7 +76,7 @@ export default function Traders() {
       setDeleteRow(null);
       await load();
     } catch (e) {
-      alert("خطأ: " + e.message);
+      alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف"));
     }
   }
 

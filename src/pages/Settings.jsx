@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Save, HardDrive } from "lucide-react";
-import { getAllSettings, setSetting } from "../lib/db.js";
+import { getAllSettings, setSetting, isTauriRuntime } from "../lib/db.js";
 import { fromInt, toInt } from "../lib/money.js";
 
 export default function Settings() {
@@ -46,6 +46,11 @@ export default function Settings() {
   }
 
   async function handleBackup() {
+    if (!isTauriRuntime()) {
+      alert("النسخ الاحتياطي متاح فقط داخل تطبيق سطح المكتب.");
+      return;
+    }
+
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const { copyFile } = await import("@tauri-apps/plugin-fs");

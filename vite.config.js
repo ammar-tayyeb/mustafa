@@ -6,6 +6,10 @@ import path from 'node:path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  test: {
+    include: ['src/**/*.test.{js,ts,jsx,tsx}'],
+    exclude: ['.tsupgrader/**', 'node_modules/**'],
+  },
   // Tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,

@@ -23,7 +23,7 @@ export default function Drivers() {
       setLoading(true); setError(null);
       const [d, v] = await Promise.all([getDrivers(), getVehicles()]);
       setRows(d); setVehicles(v);
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e?.message || String(e) || "خطأ غير معروف"); }
     finally { setLoading(false); }
   }, []);
 
@@ -46,13 +46,13 @@ export default function Drivers() {
       if (editRow) await updateDriver(editRow.id, form);
       else await createDriver(form);
       setShowForm(false); await load();
-    } catch (e) { alert("خطأ: " + e.message); }
+    } catch (e) { alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف")); }
     finally { setSaving(false); }
   }
 
   async function handleDelete() {
     try { await deleteDriver(deleteRow.id); setDeleteRow(null); await load(); }
-    catch (e) { alert("خطأ: " + e.message); }
+    catch (e) { alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف")); }
   }
 
   const columns = [

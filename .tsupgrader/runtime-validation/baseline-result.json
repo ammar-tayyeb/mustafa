@@ -1,0 +1,47 @@
+{
+  "planHash": "695fd5dc924f0ec559324b01332de69bfedd3659e38fa5b6ae17adc950f65b1f",
+  "phase": "baseline",
+  "recordedAtUtc": "2026-06-26T11:09:30.1882796Z",
+  "retryCount": 0,
+  "resetBaseline": true,
+  "result": {
+    "setupSucceeded": true,
+    "setupDurationMs": 5008,
+    "setupFailureOutput": null,
+    "assertions": [
+      {
+        "name": "tsc-no-emit",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": false,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 1,
+        "outputSample": "Version 6.0.3\r\ntsc: The TypeScript Compiler - Version 6.0.3\r\n\r\nCOMMON COMMANDS\r\n\r\n  tsc\r\n  Compiles the current project (tsconfig.json in the working directory.)\r\n\r\n  tsc app.ts util.ts\r\n  Ignoring tsconfig.json, compiles the specified files with default compiler options.\r\n\r\n  tsc -b\r\n  Build a composite project in the working directory.\r\n\r\n  tsc --init\r\n  Creates a tsconfig.json with the recommended settings in the working directory.\r\n\r\n  tsc -p ./path/to/tsconfig.json\r\n  Compiles the TypeScript project located at the specified path.\r\n\r\n  tsc --help --all\r\n  An expanded version of this information, showing all possible compiler options\r\n\r\n  tsc --noEmit\r\n  tsc --target esnext\r\n  Compiles the current project, with additional settings.\r\n\r\nCOMMAND LINE FLAGS\r\n\r\n--help, -h\r\nPrint this message.\r\n\r\n--watch, -w\r\nWatch input files.\r\n\r\n--all\r\nShow all compiler options.\r\n\r\n--version, -v\r\nPrint the compiler\u0027s version.\r\n\r\n--init\r\nInitializes a TypeScript project and creates a tsconfig.json file.\r\n\r\n--project, -p\r\nCompile the project given the path to its configuration file, or to a folder with a \u0027tsconfig.json\u0027.\r\n\r\n--showConfig\r\nPrint the final configuration instead of building.\r\n\r\n--ignoreConfig\r\nIgnore the tsconfig found and build with commandline options and files.\r\n\r\n--build, -b\r\nBuild one or more projects and their dependencies, if out of date\r\n\r\nCOMMON COMPILER OPTIONS\r\n\r\n--pretty\r\nEnable color and formatting in TypeScript\u0027s output to make compiler errors easier to read.\r\ntype: boolean\r\ndefault: true\r\n\r\n--declaration, -d\r\nGenerate .d.ts files from TypeScript and JavaScript files in your project.\r\ntype: boolean\r\ndefault: \u0060false\u0060, unless \u0060composite\u0060 is set\r\n\r\n--declarationMap\r\nCreate sourcemaps for d.ts files.\r\ntype: boolean\r\ndefault: false\r\n\r\n--emitDeclarationOnly\r\nOnly output d.ts files and not JavaScript files.\r\ntype: boolean\r\ndefault: false\r\n\r\n--sourceMap\r\nCreate source map files for emitted JavaScript files.\r\ntype: boolean\r\ndefault: false\r\n\r\n--noEmit\r\nDisable emitting files from a compilation.\r\ntype: boolean\r\ndefault: false\r\n\r\n--target, -t\r\nSet the JavaScript language version for emitted JavaScript and include compatible library declarations.\r\none of: es6/es2015, es2016, es2017, es2018, es2019, es2020, es2021, es2022, es2023, es2024, es2025, esnext\r\ndefault: es2025\r\n\r\n--module, -m\r\nSpecify what module code is generated.\r\none of: commonjs, es6/es2015, es2020, es2022, esnext, node16, node18, node20, nodenext, preserve\r\ndefault: undefined\r\n\r\n--lib\r\nSpecify a set of bundled library declaration files that describe the target runtime environment.\r\none or more: es5, es6/es2015, es7/es2016, es2017, es2018, es2019, es2020, es2021, es2022, es2023, es2024, es2025, esnext, dom, dom.iterable, dom.asynciterable, webworker, webworker.importscripts, webworker.iterable, webworker.asynciterable, scripthost, es2015.core, es2015.collection, es2015.generator, es2015.iterable, es2015.promise, es2015.proxy, es2015.reflect, es2015.symbol, es2015.symbol.wellknown, es2016.array.include, es2016.intl, es2017.arraybuffer, es2017.date, es2017.object, es2017.sharedmemory, es2017.string, es2017.intl, es2017.typedarrays, es2018.asyncgenerator, es2018.asynciterable/esnext.asynciterable, es2018.intl, es2018.promise, es2018.regexp, es2019.array, es2019.object, es2019.string, es2019.symbol/esnext.symbol, es2019.intl, es2020.bigint/esnext.bigint, es2020.date, es2020.promise, es2020.sharedmemory, es2020.string, es2020.symbol.wellknown, es2020.intl, es2020.number, es2021.promise, es2021.string, es2021.weakref/esnext.weakref, es2021.intl, es2022.array, es2022.error, es2022.intl, es2022.object, es2022.string, es2022.regexp, es2023.array, es2023.collection, es2023.intl, es2024.arraybuffer, es2024.collection, es2024.object/esnext.object, es2024.promise, es2024.regexp/esnext.regexp, es2024.sharedmemory, es2024.string/esnext.string, es2025.collection, es2025.float16/esnext.float16, es2025.intl, es2025.iterator/esnext.iterator, es2025.promise/esnext.promise, es2025.regexp, esnext.array, esnext.collection, esnext.date, esnext.decorators, esnext.disposable, esnext.error,\n\u2026[truncated]",
+        "durationMs": 2086
+      },
+      {
+        "name": "tests-pass",
+        "kind": "process",
+        "verificationMethod": "test-results",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "\r\n\u003E warehouse@0.0.0 test\r\n\u003E vitest run src/lib/money.test.js\r\n\r\n\r\n\u001B[1m\u001B[46m RUN \u001B[49m\u001B[22m \u001B[36mv3.2.6 \u001B[39m\u001B[90mc:/Users/a9335/WebstormProjects/wareHouse\u001B[39m\r\n\r\n \u001B[32m\u2713\u001B[39m src/lib/money.test.js \u001B[2m(\u001B[22m\u001B[2m3 tests\u001B[22m\u001B[2m)\u001B[22m\u001B[32m 4\u001B[2mms\u001B[22m\u001B[39m\r\n\r\n\u001B[2m Test Files \u001B[22m \u001B[1m\u001B[32m1 passed\u001B[39m\u001B[22m\u001B[90m (1)\u001B[39m\r\n\u001B[2m      Tests \u001B[22m \u001B[1m\u001B[32m3 passed\u001B[39m\u001B[22m\u001B[90m (3)\u001B[39m\r\n\u001B[2m   Start at \u001B[22m 14:09:29\r\n\u001B[2m   Duration \u001B[22m 721ms\u001B[2m (transform 36ms, setup 0ms, collect 47ms, tests 4ms, environment 0ms, prepare 201ms)\u001B[22m\r\n\r\n",
+        "durationMs": 3180,
+        "testResults": {
+          "testFramework": "vitest",
+          "runnerDetectedFrom": "package_json",
+          "testsTotal": 3,
+          "testsPassed": 3,
+          "testsFailed": 0,
+          "testsSkipped": 0,
+          "parseFailed": false
+        }
+      }
+    ]
+  }
+}

@@ -172,7 +172,7 @@ export default function Invoices() {
         getInvoices(), getTraders(), getDrivers(), getVehicles(), getAllSettings()
       ]);
       setInvoices(inv); setTraders(tr); setDrivers(dr); setVehicles(ve); setSettings(st);
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e?.message || String(e) || "خطأ غير معروف"); }
     finally { setLoading(false); }
   }, []);
 
@@ -269,7 +269,7 @@ export default function Invoices() {
       setShowForm(false);
       await load();
     } catch (e) {
-      alert("خطأ في الحفظ: " + e.message);
+      alert("خطأ في الحفظ: " + (e?.message || String(e) || "خطأ غير معروف"));
     } finally {
       setSaving(false);
     }
@@ -288,17 +288,17 @@ export default function Invoices() {
   // ─── ترحيل ─────────────────────────────────────────────────────────────────
   async function handlePost() {
     try { await postInvoice(confirmPost.id); setConfirmPost(null); await load(); }
-    catch (e) { alert("خطأ: " + e.message); }
+    catch (e) { alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف")); }
   }
 
   async function handleReverse() {
     try { await reverseInvoice(confirmReverse.id); setConfirmReverse(null); await load(); }
-    catch (e) { alert("خطأ: " + e.message); }
+    catch (e) { alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف")); }
   }
 
   async function handleDelete() {
     try { await deleteInvoice(confirmDelete.id); setConfirmDelete(null); await load(); }
-    catch (e) { alert("خطأ: " + e.message); }
+    catch (e) { alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف")); }
   }
 
   // ─── تحديث بند ─────────────────────────────────────────────────────────────

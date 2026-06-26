@@ -18,7 +18,7 @@ export default function Vehicles() {
 
   const load = useCallback(async () => {
     try { setLoading(true); setError(null); setRows(await getVehicles()); }
-    catch (e) { setError(e.message); }
+    catch (e) { setError(e?.message || String(e) || "خطأ غير معروف"); }
     finally { setLoading(false); }
   }, []);
 
@@ -39,13 +39,13 @@ export default function Vehicles() {
       if (editRow) await updateVehicle(editRow.id, form);
       else await createVehicle(form);
       setShowForm(false); await load();
-    } catch (e) { alert("خطأ: " + e.message); }
+    } catch (e) { alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف")); }
     finally { setSaving(false); }
   }
 
   async function handleDelete() {
     try { await deleteVehicle(deleteRow.id); setDeleteRow(null); await load(); }
-    catch (e) { alert("خطأ: " + e.message); }
+    catch (e) { alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف")); }
   }
 
   const columns = [
