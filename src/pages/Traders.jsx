@@ -5,7 +5,7 @@ import { formatMoney, fromInt, toInt } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 
-const EMPTY_FORM = { name: "", phone: "", address: "", notes: "" };
+const EMPTY_FORM = { name: "", phone: "", notes: "" };
 const EMPTY_PAY  = { amount: "", date: new Date().toISOString().slice(0, 10), notes: "" };
 
 export default function Traders() {
@@ -49,7 +49,7 @@ export default function Traders() {
 
   function openEdit(row) {
     setEditRow(row);
-    setForm({ name: row.name, phone: row.phone ?? "", address: row.address ?? "", notes: row.notes ?? "" });
+    setForm({ name: row.name, phone: row.phone ?? "", notes: row.notes ?? "" });
     setShowForm(true);
   }
 
@@ -108,7 +108,6 @@ export default function Traders() {
   const columns = [
     { key: "name",      label: "الاسم" },
     { key: "phone",     label: "الهاتف" },
-    { key: "address",   label: "العنوان" },
     {
       key: "debt_fils",
       label: "الدين",
@@ -144,7 +143,7 @@ export default function Traders() {
         <DataTable
           columns={columns}
           data={traders}
-          searchKeys={["name", "phone", "address"]}
+          searchKeys={["name", "phone"]}
           emptyText="لا يوجد تجار مسجّلون"
           actions={row => (
             <div className="flex items-center gap-1">
@@ -204,15 +203,7 @@ export default function Traders() {
                   placeholder="رقم الهاتف"
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">العنوان</label>
-                <input
-                  value={form.address}
-                  onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-                  className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="العنوان"
-                />
-              </div>
+            
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">ملاحظات</label>
                 <textarea

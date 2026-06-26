@@ -1,15 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
-import { getDrivers, createDriver, updateDriver, deleteDriver, getVehicles } from "../lib/db.js";
+import { getDrivers, getVehicles, createDriver, updateDriver, deleteDriver } from "../lib/db.js";
 import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
-import EntityCombobox from "../components/EntityCombobox.jsx";
 
-const EMPTY = { name: "", phone: "", vehicle_id: null, notes: "" };
+const EMPTY = { name: "", phone: "", vehicle_plate: "", notes: "" };
 
 export default function Drivers() {
   const [rows, setRows]           = useState([]);
-  const [vehicles, setVehicles]   = useState([]);
+  const [vehicles, setVehicles]    = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [showForm, setShowForm]   = useState(false);
@@ -21,8 +20,9 @@ export default function Drivers() {
   const load = useCallback(async () => {
     try {
       setLoading(true); setError(null);
-      const [d, v] = await Promise.all([getDrivers(), getVehicles()]);
-      setRows(d); setVehicles(v);
+      const [driverRows, vehicleRows] = await Promise.all([getDrivers(), getVehicles()]);
+      setRows(driverRows);
+      setVehicles(vehicleRows);
     } catch (e) { setError(e?.message || String(e) || "خطأ غير معروف"); }
     finally { setLoading(false); }
   }, []);
@@ -34,7 +34,7 @@ export default function Drivers() {
   function openAdd() { setEditRow(null); setForm(EMPTY); setShowForm(true); }
   function openEdit(row) {
     setEditRow(row);
-    setForm({ name: row.name, phone: row.phone ?? "", vehicle_id: row.vehicle_id ?? null, notes: row.notes ?? "" });
+    setForm({ name: row.name, phone: row.phone ?? "", vehicle_plate: row.vehicle_plate ?? "", notes: row.notes ?? "" });
     setShowForm(true);
   }
 
@@ -58,7 +58,7 @@ export default function Drivers() {
   const columns = [
     { key: "name",          label: "الاسم" },
     { key: "phone",         label: "الهاتف" },
-    { key: "vehicle_plate", label: "المركبة" },
+    { key: "vehicle_plate", label: "السيارة / اللوحة" },
     { key: "notes",         label: "ملاحظات", sortable: false },
   ];
 
@@ -106,13 +106,9 @@ export default function Drivers() {
                   className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring" placeholder="رقم الهاتف" />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">المركبة</label>
-                <EntityCombobox
-                  items={vehicleItems}
-                  value={form.vehicle_id}
-                  onChange={(id) => setForm(f => ({ ...f, vehicle_id: id }))}
-                  placeholder="اختر مركبة..."
-                />
+                <label className="text-sm font-medium">السيارة / اللوحة</label>
+                <input value={form.vehicle_plate} onChange={e => setForm(f => ({ ...f, vehicle_plate: e.target.value }))}
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring" placeholder="رقم اللوحة أو اسم السيارة" />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">ملاحظات</label>

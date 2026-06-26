@@ -21,19 +21,8 @@ CREATE TABLE IF NOT EXISTS traders (
 );
 CREATE INDEX IF NOT EXISTS idx_traders_name ON traders(name) WHERE is_deleted=0;
 
--- =============================================
--- جدول المركبات
--- =============================================
-CREATE TABLE IF NOT EXISTS vehicles (
-    id          TEXT PRIMARY KEY,
-    plate       TEXT NOT NULL,
-    type        TEXT,
-    notes       TEXT,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    is_deleted  INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_vehicles_plate ON vehicles(plate) WHERE is_deleted=0;
+
+select * from traders;
 
 -- =============================================
 -- جدول السائقين
@@ -42,7 +31,7 @@ CREATE TABLE IF NOT EXISTS drivers (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
     phone       TEXT,
-    vehicle_id  TEXT REFERENCES vehicles(id),
+    vehicle_id  TEXT ,
     notes       TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
@@ -57,7 +46,6 @@ CREATE TABLE IF NOT EXISTS invoices (
     id              TEXT PRIMARY KEY,
     trader_id       TEXT REFERENCES traders(id),
     driver_id       TEXT REFERENCES drivers(id),
-    vehicle_id      TEXT REFERENCES vehicles(id),
     date            TEXT NOT NULL,              -- YYYY-MM-DD
     status          TEXT NOT NULL DEFAULT 'draft', -- draft | posted
     total_final     INTEGER NOT NULL DEFAULT 0, -- إجمالي المبلغ النهائي
@@ -89,7 +77,8 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     commission_value    INTEGER NOT NULL DEFAULT 0, -- قيمة العمولة المأخوذة
     amount_after_comm   INTEGER NOT NULL DEFAULT 0, -- المبلغ بعد العمولة
     porterage           INTEGER NOT NULL DEFAULT 0, -- الحمالية (مبلغ رقمي)
-    final_amount        INTEGER NOT NULL DEFAULT 0, -- المبلغ النهائي (قابل للتعديل)
+    final_amount        INTEGER NOT NULL DEFAULT 0,
+    basket_number       INTEGER NOT NULL DEFAULT 0, -- رقم السلة
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
     is_deleted          INTEGER NOT NULL DEFAULT 0
@@ -140,7 +129,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- إعدادات افتراضية
 INSERT OR IGNORE INTO settings(key, value, updated_at) VALUES
-    ('market_name',         'نظام إدارة العلوة',    datetime('now')),
-    ('currency',            'ريال',                  datetime('now')),
+    ('market_name',         'warehouse System',    datetime('now')),
+    ('currency',            'diq',                  datetime('now')),
     ('default_commission',  '500',                   datetime('now')),  -- 5.00%
     ('basket_weight',       '50',                    datetime('now'));   -- 0.50 كجم

@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router";
 import {
-  LayoutDashboard,
+
   Users,
   Truck,
   UserCheck,
@@ -11,11 +11,10 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { to: "/",             label: "لوحة المعلومات",  icon: LayoutDashboard, end: true },
   { to: "/traders",      label: "التجار",           icon: Users },
   { to: "/vehicles",     label: "المركبات",         icon: Truck },
   { to: "/drivers",      label: "السائقون",         icon: UserCheck },
-  { to: "/invoices",     label: "الفواتير",         icon: FileText },
+  { to: "/",     label: "الفواتير",         icon: FileText },
   { to: "/transactions", label: "سجل المعاملات",   icon: ScrollText },
   { to: "/reports",      label: "التقارير",         icon: BarChart2 },
   { to: "/settings",     label: "الإعدادات",        icon: Settings },

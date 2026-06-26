@@ -1,4 +1,6 @@
 let _db = null;
+const _tableColumnCache = new Map();
+let _schemaEnsured = false;
 
 const fallbackDb = {
   async select() {
@@ -108,7 +110,110 @@ export async function getDb() {
       _db = fallbackDb;
     }
   }
+
+  if (isTauriRuntime() && !_schemaEnsured) {
+    await ensureDesktopSchema(_db);
+    _schemaEnsured = true;
+  }
+
   return _db;
+}
+
+export async function hasColumn(table, column) {
+  const cacheKey = `${table}.${column}`;
+  if (_tableColumnCache.has(cacheKey)) {
+    return _tableColumnCache.get(cacheKey);
+  }
+
+  const db = await getDb();
+  const exists = await tableHasColumn(db, table, column);
+  _tableColumnCache.set(cacheKey, exists);
+  return exists;
+}
+
+async function tableHasColumn(db, table, column) {
+  const rows = await db.select(`PRAGMA table_info(${table})`);
+  return rows.some(row => String(row.name).toLowerCase() === String(column).toLowerCase());
+}
+
+async function addColumnIfMissing(db, table, column, definition) {
+  if (await tableHasColumn(db, table, column)) {
+    return false;
+  }
+
+  await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  _tableColumnCache.set(`${table}.${column}`, true);
+  return true;
+}
+
+async function ensureDesktopSchema(db) {
+  await addColumnIfMissing(db, "traders", "phone", "TEXT");
+  await addColumnIfMissing(db, "traders", "address", "TEXT");
+  await addColumnIfMissing(db, "traders", "notes", "TEXT");
+  await addColumnIfMissing(db, "traders", "debt_fils", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "traders", "created_at", "TEXT");
+  await addColumnIfMissing(db, "traders", "updated_at", "TEXT");
+  await addColumnIfMissing(db, "traders", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+
+  await addColumnIfMissing(db, "vehicles", "type", "TEXT");
+  await addColumnIfMissing(db, "vehicles", "notes", "TEXT");
+  await addColumnIfMissing(db, "vehicles", "created_at", "TEXT");
+  await addColumnIfMissing(db, "vehicles", "updated_at", "TEXT");
+  await addColumnIfMissing(db, "vehicles", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+
+  await addColumnIfMissing(db, "drivers", "phone", "TEXT");
+  await addColumnIfMissing(db, "drivers", "vehicle_id", "TEXT REFERENCES vehicles(id)");
+  const addedVehiclePlate = await addColumnIfMissing(db, "drivers", "vehicle_plate", "TEXT");
+  await addColumnIfMissing(db, "drivers", "notes", "TEXT");
+  await addColumnIfMissing(db, "drivers", "created_at", "TEXT");
+  await addColumnIfMissing(db, "drivers", "updated_at", "TEXT");
+  await addColumnIfMissing(db, "drivers", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+
+  if (addedVehiclePlate || await tableHasColumn(db, "drivers", "vehicle_plate")) {
+    await db.execute(`
+      UPDATE drivers
+      SET vehicle_plate = (
+        SELECT v.plate
+        FROM vehicles v
+        WHERE v.id = drivers.vehicle_id
+          AND v.is_deleted = 0
+      )
+      WHERE vehicle_plate IS NULL AND vehicle_id IS NOT NULL
+    `);
+  }
+
+  await addColumnIfMissing(db, "invoices", "trader_id", "TEXT REFERENCES traders(id)");
+  await addColumnIfMissing(db, "invoices", "driver_id", "TEXT REFERENCES drivers(id)");
+  await addColumnIfMissing(db, "invoices", "vehicle_id", "TEXT REFERENCES vehicles(id)");
+  await addColumnIfMissing(db, "invoices", "date", "TEXT");
+  await addColumnIfMissing(db, "invoices", "status", "TEXT NOT NULL DEFAULT 'draft'");
+  await addColumnIfMissing(db, "invoices", "total_final", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoices", "paid_amount", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoices", "remaining", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoices", "notes", "TEXT");
+  await addColumnIfMissing(db, "invoices", "created_at", "TEXT");
+  await addColumnIfMissing(db, "invoices", "updated_at", "TEXT");
+  await addColumnIfMissing(db, "invoices", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+
+  await addColumnIfMissing(db, "invoice_items", "basket_number", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "payments", "trader_id", "TEXT REFERENCES traders(id)");
+  await addColumnIfMissing(db, "payments", "amount", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "payments", "date", "TEXT");
+  await addColumnIfMissing(db, "payments", "notes", "TEXT");
+  await addColumnIfMissing(db, "payments", "created_at", "TEXT");
+  await addColumnIfMissing(db, "payments", "updated_at", "TEXT");
+  await addColumnIfMissing(db, "payments", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+
+  await addColumnIfMissing(db, "transactions_log", "type", "TEXT");
+  await addColumnIfMissing(db, "transactions_log", "ref_id", "TEXT");
+  await addColumnIfMissing(db, "transactions_log", "trader_id", "TEXT REFERENCES traders(id)");
+  await addColumnIfMissing(db, "transactions_log", "amount", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "transactions_log", "description", "TEXT");
+  await addColumnIfMissing(db, "transactions_log", "date", "TEXT");
+  await addColumnIfMissing(db, "transactions_log", "created_at", "TEXT");
+  await addColumnIfMissing(db, "transactions_log", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+
+  await addColumnIfMissing(db, "settings", "updated_at", "TEXT");
 }
 
 export function uuid() {
@@ -227,46 +332,96 @@ export async function deleteVehicle(id) {
 // ─── Drivers ────────────────────────────────────────────────────────────────
 export async function getDrivers() {
   if (!isTauriRuntime()) {
-    const drivers = getFallbackRecords("drivers").filter(item => item.is_deleted !== 1);
-    const vehicles = new Map(getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
-    return drivers.map(driver => ({ ...driver, vehicle_plate: vehicles.get(driver.vehicle_id)?.plate ?? null })).sort((a, b) => a.name.localeCompare(b.name));
+    return getFallbackRecords("drivers")
+      .filter(item => item.is_deleted !== 1)
+      .map(driver => ({ ...driver, vehicle_plate: driver.vehicle_plate ?? null }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
   const db = await getDb();
+  if (await hasColumn("drivers", "vehicle_plate")) {
+    return db.select(`
+      SELECT id, name, phone, vehicle_plate, notes, created_at, updated_at, is_deleted
+      FROM drivers
+      WHERE is_deleted=0 ORDER BY name
+    `);
+  }
+
   return db.select(`
-    SELECT d.*, v.plate as vehicle_plate
+    SELECT d.id, d.name, d.phone, v.plate as vehicle_plate, d.notes, d.created_at, d.updated_at, d.is_deleted
     FROM drivers d
     LEFT JOIN vehicles v ON d.vehicle_id = v.id
     WHERE d.is_deleted=0 ORDER BY d.name
   `);
 }
 
-export async function createDriver({ name, phone = null, vehicle_id = null, notes = null }) {
+export async function createDriver({ name, phone = null, vehicle_plate = null, notes = null }) {
   if (!isTauriRuntime()) {
     const store = ensureFallbackStore();
     const id = uuid(); const ts = now();
-    store.drivers.push({ id, name, phone, vehicle_id, notes, is_deleted: 0, created_at: ts, updated_at: ts });
+    store.drivers.push({ id, name, phone, vehicle_plate, notes, is_deleted: 0, created_at: ts, updated_at: ts });
     persistFallbackStore(store);
     return id;
   }
   const db = await getDb();
   const id = uuid(); const ts = now();
-  await db.execute(
-    "INSERT INTO drivers (id, name, phone, vehicle_id, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [id, name, phone, vehicle_id, notes, ts, ts]
-  );
+  if (await hasColumn("drivers", "vehicle_plate")) {
+    await db.execute(
+      "INSERT INTO drivers (id, name, phone, vehicle_plate, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, name, phone, vehicle_plate, notes, ts, ts]
+    );
+  } else {
+    let vehicleId = null;
+    if (vehicle_plate?.trim()) {
+      const plate = vehicle_plate.trim();
+      const rows = await db.select("SELECT id FROM vehicles WHERE plate=? AND is_deleted=0 LIMIT 1", [plate]);
+      vehicleId = rows[0]?.id ?? null;
+      if (!vehicleId) {
+        vehicleId = uuid();
+        await db.execute(
+          "INSERT INTO vehicles (id, plate, created_at, updated_at) VALUES (?, ?, ?, ?)",
+          [vehicleId, plate, ts, ts]
+        );
+      }
+    }
+    await db.execute(
+      "INSERT INTO drivers (id, name, phone, vehicle_id, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, name, phone, vehicleId, notes, ts, ts]
+    );
+  }
   return id;
 }
 
 export async function updateDriver(id, fields) {
   if (!isTauriRuntime()) {
-    updateFallbackRecord("drivers", id, row => ({ ...row, name: fields.name, phone: fields.phone ?? null, vehicle_id: fields.vehicle_id ?? null, notes: fields.notes ?? null, updated_at: now() }));
+    updateFallbackRecord("drivers", id, row => ({ ...row, name: fields.name, phone: fields.phone ?? null, vehicle_plate: fields.vehicle_plate ?? null, notes: fields.notes ?? null, updated_at: now() }));
     return;
   }
   const db = await getDb();
-  await db.execute(
-    "UPDATE drivers SET name=?, phone=?, vehicle_id=?, notes=?, updated_at=? WHERE id=?",
-    [fields.name, fields.phone ?? null, fields.vehicle_id ?? null, fields.notes ?? null, now(), id]
-  );
+  if (await hasColumn("drivers", "vehicle_plate")) {
+    await db.execute(
+      "UPDATE drivers SET name=?, phone=?, vehicle_plate=?, notes=?, updated_at=? WHERE id=?",
+      [fields.name, fields.phone ?? null, fields.vehicle_plate ?? null, fields.notes ?? null, now(), id]
+    );
+  } else {
+    let vehicleId = null;
+    if (fields.vehicle_plate?.trim()) {
+      const plate = fields.vehicle_plate.trim();
+      const rows = await db.select("SELECT id FROM vehicles WHERE plate=? AND is_deleted=0 LIMIT 1", [plate]);
+      vehicleId = rows[0]?.id ?? null;
+      if (!vehicleId) {
+        vehicleId = uuid();
+        const ts = now();
+        await db.execute(
+          "INSERT INTO vehicles (id, plate, created_at, updated_at) VALUES (?, ?, ?, ?)",
+          [vehicleId, plate, ts, ts]
+        );
+      }
+    }
+    await db.execute(
+      "UPDATE drivers SET name=?, phone=?, vehicle_id=?, notes=?, updated_at=? WHERE id=?",
+      [fields.name, fields.phone ?? null, vehicleId, fields.notes ?? null, now(), id]
+    );
+  }
 }
 
 export async function deleteDriver(id) {

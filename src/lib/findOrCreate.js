@@ -67,7 +67,7 @@ export async function findOrCreateDriver(name) {
     const store = getFallbackStore();
     const id = uuid(); const ts = now();
     store.drivers = store.drivers || [];
-    store.drivers.push({ id, name: normalized, phone: null, vehicle_id: null, notes: null, is_deleted: 0, created_at: ts, updated_at: ts });
+    store.drivers.push({ id, name: normalized, phone: null, vehicle_plate: null, notes: null, is_deleted: 0, created_at: ts, updated_at: ts });
     saveFallbackStore(store);
     return id;
   }
@@ -78,10 +78,18 @@ export async function findOrCreateDriver(name) {
   );
   if (rows.length > 0) return rows[0].id;
   const id = uuid(); const ts = now();
-  await db.execute(
-    "INSERT INTO drivers (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-    [id, normalized, ts, ts]
-  );
+  const { hasColumn } = await import("./db.js");
+  if (await hasColumn("drivers", "vehicle_plate")) {
+    await db.execute(
+      "INSERT INTO drivers (id, name, vehicle_plate, created_at, updated_at) VALUES (?, ?, NULL, ?, ?)",
+      [id, normalized, ts, ts]
+    );
+  } else {
+    await db.execute(
+      "INSERT INTO drivers (id, name, vehicle_id, created_at, updated_at) VALUES (?, ?, NULL, ?, ?)",
+      [id, normalized, ts, ts]
+    );
+  }
   return id;
 }
 
