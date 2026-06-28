@@ -95,6 +95,8 @@ export function isTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 }
 
+// important: this function should be called only once at the start of the app, to ensure that the database schema is up-to-date.
+
 export async function getDb() {
   if (!_db) {
     if (!isTauriRuntime()) {
@@ -169,6 +171,25 @@ async function ensureDesktopSchema(db) {
   await addColumnIfMissing(db, "drivers", "updated_at", "TEXT");
   await addColumnIfMissing(db, "drivers", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
 
+// ─── تحديث جدول بنود الفواتير (Invoice Items) ليكون مطابقاً للـ SQL ───
+  await addColumnIfMissing(db, "invoice_items", "invoice_id", "TEXT NOT NULL"); // لاحظ: يجب أن يكون موجوداً
+  await addColumnIfMissing(db, "invoice_items", "product_name", "TEXT NOT NULL");
+  await addColumnIfMissing(db, "invoice_items", "gross_weight", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "basket_count", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "basket_weight_each", "INTEGER NOT NULL DEFAULT 50");
+  await addColumnIfMissing(db, "invoice_items", "net_weight", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "price", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "amount_before", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "commission_rate", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "commission_value", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "amount_after_comm", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "porterage", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "final_amount", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "basket_number", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "created_at", "TEXT NOT NULL");
+  await addColumnIfMissing(db, "invoice_items", "updated_at", "TEXT NOT NULL");
+  await addColumnIfMissing(db, "invoice_items", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+
   if (addedVehiclePlate || await tableHasColumn(db, "drivers", "vehicle_plate")) {
     await db.execute(`
       UPDATE drivers
@@ -233,6 +254,7 @@ export async function getTraders() {
   if (!isTauriRuntime()) {
     return getFallbackRecords("traders").filter(item => item.is_deleted !== 1).sort((a, b) => a.name.localeCompare(b.name));
   }
+  // this what works in the app
   const db = await getDb();
   return db.select("SELECT * FROM traders WHERE is_deleted=0 ORDER BY name");
 }

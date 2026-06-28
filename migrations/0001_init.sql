@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     id                  TEXT PRIMARY KEY,
     invoice_id          TEXT NOT NULL REFERENCES invoices(id),
     product_name        TEXT NOT NULL,          -- اسم المادة
-    gross_weight        INTEGER NOT NULL DEFAULT 0, -- الوزن الكلي (× 100 للدقة)
+    gross_weight        INTEGER NOT NULL DEFAULT 0, -- 
     basket_count        INTEGER NOT NULL DEFAULT 0, -- عدد السلات
     basket_weight_each  INTEGER NOT NULL DEFAULT 50, -- وزن السلة × 100 (افتراضي 0.5 كجم = 50)
     net_weight          INTEGER NOT NULL DEFAULT 0, -- صافي الوزن المحسوب

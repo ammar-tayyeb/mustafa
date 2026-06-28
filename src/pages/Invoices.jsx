@@ -108,30 +108,27 @@ function ItemRow({ item, defaultCommission, onChange, onRemove }) {
       </div>
 
       {/* نتائج الحساب */}
-      {c && (
-        <div className="grid grid-cols-5 gap-1 rounded bg-muted/50 px-2 py-1.5 text-xs">
-          <div className="text-center">
-            <p className="text-muted-foreground">صافي الوزن</p>
-            <p className="font-medium">{c.display.netWeight.toFixed(2)}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-muted-foreground">قبل العمولة</p>
-            <p className="font-medium">{c.display.amountBefore.toFixed(2)}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-muted-foreground">قيمة العمولة</p>
-            <p className="font-medium text-orange-600">{c.display.commissionValue.toFixed(2)}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-muted-foreground">بعد العمولة</p>
-            <p className="font-medium">{c.display.amountAfterComm.toFixed(2)}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-muted-foreground">النهائي</p>
-            <p className="font-semibold text-primary">{c.display.finalAmount.toFixed(2)}</p>
-          </div>
-        </div>
-      )}
+    
+{c && (
+  <div className="grid grid-cols-5 gap-1 rounded bg-muted/50 px-2 py-1.5 text-xs">
+    <div className="text-center">
+      <p className="text-muted-foreground">الصافي</p>
+      <p className="font-medium">{formatMoney(c.display.netWeight, "")}</p>
+    </div>
+    <div className="text-center">
+      <p className="text-muted-foreground">قبل العمولة</p>
+      <p className="font-medium">{formatMoney(c.display.amountBefore, "")}</p>
+    </div>
+    <div className="text-center">
+      <p className="text-muted-foreground">العمولة</p>
+      <p className="font-medium text-orange-600">{formatMoney(c.display.commissionValue, "")}</p>
+    </div>
+    <div className="text-center">
+      <p className="text-muted-foreground">النهائي</p>
+      <p className="font-semibold text-primary">{formatMoney(c.display.finalAmount, "")}</p>
+    </div>
+  </div>
+)}
     </div>
   );
 }
@@ -152,7 +149,15 @@ export default function Invoices() {
   const [invForm, setInvForm]     = useState({ trader_id: null, trader_label: "", driver_id: null, driver_label: "", vehicle_id: null, vehicle_label: "", date: new Date().toISOString().slice(0,10), notes: "" });
   const [items, setItems]         = useState([emptyItem()]);
   const [paidAmount, setPaidAmount] = useState("");
+
   const [saving, setSaving]       = useState(false);
+
+  const handlePaidChange = (e) => {
+  const rawValue = e.target.value.replace(/,/g, ""); // إزالة الفواصل
+  if (/^\d*$/.test(rawValue)) { // التأكد أنه رقم فقط
+    setPaidAmount(rawValue);
+  }
+};
 
   // عرض تفاصيل
   const [viewInv, setViewInv]     = useState(null);
@@ -172,7 +177,7 @@ export default function Invoices() {
         getInvoices(), getTraders(), getDrivers(), getVehicles(), getAllSettings()
       ]);
       setInvoices(inv); setTraders(tr); setDrivers(dr); setVehicles(ve); setSettings(st);
-    } catch (e) { setError(e?.message || String(e) || "خطأ غير معروف"); }
+    } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, []);
 
@@ -335,44 +340,9 @@ export default function Invoices() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold">الفواتير</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">إدارة فواتير البيع وسلسلة الحساب</p>
-        </div>
-        <button onClick={openNew} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90">
-          <Plus size={16} /> فاتورة جديدة
-        </button>
-      </div>
-
-      {error && <div className="rounded-md bg-destructive/10 text-destructive px-4 py-3 text-sm">{error}</div>}
-
-      {loading ? <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div> : (
-        <DataTable
-          columns={columns} data={invoices}
-          searchKeys={["trader_name", "driver_name", "vehicle_plate", "date"]}
-          emptyText="لا توجد فواتير"
-          actions={row => (
-            <div className="flex items-center gap-1">
-              <button onClick={() => handleView(row)} title="عرض" className="p-1.5 rounded hover:bg-accent"><Eye size={15} /></button>
-              {row.status === "draft" && (
-                <>
-                  <button onClick={() => openEdit(row)} title="تعديل" className="p-1.5 rounded hover:bg-accent"><Plus size={15} /></button>
-                  <button onClick={() => setConfirmPost(row)} title="ترحيل" className="p-1.5 rounded hover:bg-accent text-green-600"><CheckCircle size={15} /></button>
-                  <button onClick={() => setConfirmDelete(row)} title="حذف" className="p-1.5 rounded hover:bg-accent text-destructive"><Trash2 size={15} /></button>
-                </>
-              )}
-              {row.status === "posted" && (
-                <button onClick={() => setConfirmReverse(row)} title="عكس" className="p-1.5 rounded hover:bg-accent text-orange-500"><RotateCcw size={15} /></button>
-              )}
-            </div>
-          )}
-        />
-      )}
-
       {/* ─── نموذج الفاتورة ─────────────────────────────────────────────────── */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto py-6">
+      {(
+        <div className=" inset-0 z-50 flex items-start justify-center  overflow-y-auto py-6">
           <div className="bg-background rounded-lg shadow-xl border border-border w-full max-w-4xl mx-4">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <h3 className="font-semibold text-lg">{editInv ? "تعديل فاتورة" : "فاتورة جديدة"}</h3>
@@ -432,20 +402,23 @@ export default function Invoices() {
               <div className="rounded-md border border-border bg-muted/30 p-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 <div>
                   <p className="text-xs text-muted-foreground">إجمالي النهائي</p>
-                  <p className="font-bold text-lg">{fromInt(liveTotals.total_final).toFixed(2)}</p>
+                  <p className="font-bold text-lg">{formatMoney(liveTotals.total_final, "")}</p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-muted-foreground">الواصل (المدفوع)</label>
-                  <input type="number" min="0" step="0.01" value={paidAmount}
-                    onChange={e => setPaidAmount(e.target.value)}
-                    className="rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring"
-                    placeholder="0.00" />
+                  <input 
+    type="text" // تغيير النوع إلى text
+    value={paidAmount ? Number(paidAmount).toLocaleString("en-US") : ""}
+    onChange={handlePaidChange}
+    className="rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring"
+    placeholder="0" 
+  />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">الباقي (يُحوَّل للديون)</p>
                   <p className={`font-bold text-lg ${liveTotals.remaining > 0 ? "text-destructive" : ""}`}>
-                    {fromInt(liveTotals.remaining).toFixed(2)}
-                  </p>
+  {formatMoney(liveTotals.remaining, "")}
+</p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-muted-foreground">ملاحظات</label>
@@ -465,6 +438,40 @@ export default function Invoices() {
           </div>
         </div>
       )}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold">الفواتير</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">إدارة فواتير البيع وسلسلة الحساب</p>
+        </div>
+        
+      </div>
+
+      {error && <div className="rounded-md bg-destructive/10 text-destructive px-4 py-3 text-sm">{error}</div>}
+
+      {loading ? <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div> : (
+        <DataTable
+          columns={columns} data={invoices}
+          searchKeys={["trader_name", "driver_name", "vehicle_plate", "date"]}
+          emptyText="لا توجد فواتير"
+          actions={row => (
+            <div className="flex items-center gap-1">
+              <button onClick={() => handleView(row)} title="عرض" className="p-1.5 rounded hover:bg-accent"><Eye size={15} /></button>
+              {row.status === "draft" && (
+                <>
+                  <button onClick={() => openEdit(row)} title="تعديل" className="p-1.5 rounded hover:bg-accent"><Plus size={15} /></button>
+                  <button onClick={() => setConfirmPost(row)} title="ترحيل" className="p-1.5 rounded hover:bg-accent text-green-600"><CheckCircle size={15} /></button>
+                  <button onClick={() => setConfirmDelete(row)} title="حذف" className="p-1.5 rounded hover:bg-accent text-destructive"><Trash2 size={15} /></button>
+                </>
+              )}
+              {row.status === "posted" && (
+                <button onClick={() => setConfirmReverse(row)} title="عكس" className="p-1.5 rounded hover:bg-accent text-orange-500"><RotateCcw size={15} /></button>
+              )}
+            </div>
+          )}
+        />
+      )}
+
+      
 
       {/* ─── عرض تفاصيل الفاتورة ────────────────────────────────────────────── */}
       {viewInv && (
@@ -502,15 +509,15 @@ export default function Invoices() {
                     {viewItems.map(it => (
                       <tr key={it.id} className="hover:bg-muted/20">
                         <td className="px-2 py-2 text-center">{it.product_name}</td>
-                        <td className="px-2 py-2 text-center">{fromInt(it.gross_weight).toFixed(2)}</td>
+                        <td className="px-2 py-2 text-center">{fromInt(it.gross_weight)}</td>
                         <td className="px-2 py-2 text-center">{it.basket_count}</td>
-                        <td className="px-2 py-2 text-center">{fromInt(it.net_weight).toFixed(2)}</td>
-                        <td className="px-2 py-2 text-center">{fromInt(it.price).toFixed(2)}</td>
-                        <td className="px-2 py-2 text-center">{fromInt(it.amount_before).toFixed(2)}</td>
-                        <td className="px-2 py-2 text-center text-orange-600">{fromInt(it.commission_value).toFixed(2)}</td>
-                        <td className="px-2 py-2 text-center">{fromInt(it.amount_after_comm).toFixed(2)}</td>
-                        <td className="px-2 py-2 text-center">{fromInt(it.porterage).toFixed(2)}</td>
-                        <td className="px-2 py-2 text-center font-semibold text-primary">{fromInt(it.final_amount).toFixed(2)}</td>
+                        <td className="px-2 py-2 text-center">{fromInt(it.net_weight)}</td>
+                        <td className="px-2 py-2 text-center">{fromInt(it.price)}</td>
+                        <td className="px-2 py-2 text-center">{fromInt(it.amount_before)}</td>
+                        <td className="px-2 py-2 text-center text-orange-600">{fromInt(it.commission_value)}</td>
+                        <td className="px-2 py-2 text-center">{fromInt(it.amount_after_comm)}</td>
+                        <td className="px-2 py-2 text-center">{fromInt(it.porterage)}</td>
+                        <td className="px-2 py-2 text-center font-semibold text-primary">{fromInt(it.final_amount)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -2,7 +2,6 @@ import { NavLink, Outlet } from "react-router";
 import {
 
   Users,
-  Truck,
   UserCheck,
   FileText,
   ScrollText,
@@ -12,7 +11,6 @@ import {
 
 const navItems = [
   { to: "/traders",      label: "التجار",           icon: Users },
-  { to: "/vehicles",     label: "المركبات",         icon: Truck },
   { to: "/drivers",      label: "السائقون",         icon: UserCheck },
   { to: "/",     label: "الفواتير",         icon: FileText },
   { to: "/transactions", label: "سجل المعاملات",   icon: ScrollText },
