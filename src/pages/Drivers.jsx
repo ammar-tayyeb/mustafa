@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
-import { getDrivers, getVehicles, createDriver, updateDriver, deleteDriver } from "../lib/db.js";
+import { getDrivers, createDriver, updateDriver, deleteDriver } from "../lib/db.js";
 import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 
@@ -8,7 +8,6 @@ const EMPTY = { name: "", phone: "", vehicle_plate: "", notes: "" };
 
 export default function Drivers() {
   const [rows, setRows]           = useState([]);
-  const [vehicles, setVehicles]    = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [showForm, setShowForm]   = useState(false);
@@ -20,16 +19,16 @@ export default function Drivers() {
   const load = useCallback(async () => {
     try {
       setLoading(true); setError(null);
-      const [driverRows, vehicleRows] = await Promise.all([getDrivers(), getVehicles()]);
+      const [driverRows] = await Promise.all([getDrivers()]);
       setRows(driverRows);
-      setVehicles(vehicleRows);
+      
     } catch (e) { setError(e?.message || String(e) || "خطأ غير معروف"); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const vehicleItems = vehicles.map(v => ({ id: v.id, label: v.plate }));
+  
 
   function openAdd() { setEditRow(null); setForm(EMPTY); setShowForm(true); }
   function openEdit(row) {

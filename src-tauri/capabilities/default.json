@@ -10,6 +10,14 @@
     "sql:default",
     "sql:allow-execute",
     "dialog:default",
-    "fs:default"
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-copy-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }]
+    }
   ]
 }

@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router";
 import AppLayout from "./components/AppLayout";
 import Traders from "./pages/Traders";
-import Vehicles from "./pages/Vehicles";
+import TradersDebts from "./pages/TraderDebts";
 import Drivers from "./pages/Drivers";
 import Invoices from "./pages/Invoices";
 import Transactions from "./pages/Transactions";
@@ -15,7 +15,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route index path="/" element={<Invoices />} />
           <Route path="traders" element={<Traders />} />
-          <Route path="vehicles" element={<Vehicles />} />
+          <Route path="debts" element={<TradersDebts />} />
           <Route path="drivers" element={<Drivers />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="reports" element={<Reports />} />

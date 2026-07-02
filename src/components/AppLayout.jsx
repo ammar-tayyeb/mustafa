@@ -1,6 +1,5 @@
 import { NavLink, Outlet } from "react-router";
 import {
-
   Users,
   UserCheck,
   FileText,
@@ -10,26 +9,33 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { to: "/traders",      label: "التجار",           icon: Users },
-  { to: "/drivers",      label: "السائقون",         icon: UserCheck },
-  { to: "/",     label: "الفواتير",         icon: FileText },
+  { to: "/",             label: "المبيعات",         icon: FileText },
+  { to: "/traders",      label: "البگاگيل",           icon: Users },
+  { to: "/debts",        label: "الديون",           icon: Users },
+  { to: "/drivers",      label: "السواق",         icon: UserCheck },
   { to: "/transactions", label: "سجل المعاملات",   icon: ScrollText },
   { to: "/reports",      label: "التقارير",         icon: BarChart2 },
   { to: "/settings",     label: "الإعدادات",        icon: Settings },
 ];
 
+
 export default function AppLayout() {
   return (
-    <div className="flex h-screen bg-background text-foreground overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-56 shrink-0 flex flex-col border-s border-border bg-sidebar">
-        <div className="px-4 py-5 border-b border-border">
-          <h1 className="text-base font-bold text-sidebar-foreground leading-tight">
-            نظام إدارة العلوة
+    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+      {/* Header */}
+      <header className="h-16 shrink-0 flex items-center justify-between px-6 border-b border-border bg-sidebar">
+        {/* Logo / Title */}
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-bold text-sidebar-foreground leading-tight">
+              العلوة
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">سوق الجملة</p>
+          <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+            سوق الجملة
+          </span>
         </div>
-        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+
+        {/* Navigation */}
+        <nav className="flex items-center gap-1 h-full py-2">
           {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -37,7 +43,7 @@ export default function AppLayout() {
               end={end}
               className={({ isActive }) =>
                 [
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                  "flex items-center gap-2 px-3 h-full rounded-md text-sm font-medium transition-colors",
                   isActive
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -45,17 +51,14 @@ export default function AppLayout() {
               }
             >
               <Icon size={16} className="shrink-0" />
-              {label}
+              <span>{label}</span>
             </NavLink>
           ))}
         </nav>
-        <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
-          v1.0.0 — offline
-        </div>
-      </aside>
+      </header>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-2">
         <Outlet />
       </main>
     </div>

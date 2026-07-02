@@ -19,20 +19,20 @@ function cloneData(value) {
 
 function getFallbackStore() {
   if (typeof window === "undefined" || typeof localStorage === "undefined") {
-    return { traders: [], vehicles: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+    return { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
   }
 
   try {
     const raw = localStorage.getItem(FALLBACK_STORE_KEY);
     if (!raw) {
-      const initial = { traders: [], vehicles: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+      const initial = { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
       localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(initial));
       return initial;
     }
     return JSON.parse(raw);
   } catch (error) {
     console.warn("Unable to read fallback store, resetting it.", error);
-    const initial = { traders: [], vehicles: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+    const initial = { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
     localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(initial));
     return initial;
   }
@@ -47,7 +47,6 @@ function persistFallbackStore(store) {
 function ensureFallbackStore() {
   const store = getFallbackStore();
   store.traders ??= [];
-  store.vehicles ??= [];
   store.drivers ??= [];
   store.invoices ??= [];
   store.invoice_items ??= [];
@@ -94,8 +93,6 @@ function pushFallbackRecord(table, row) {
 export function isTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 }
-
-// important: this function should be called only once at the start of the app, to ensure that the database schema is up-to-date.
 
 export async function getDb() {
   if (!_db) {
@@ -157,22 +154,14 @@ async function ensureDesktopSchema(db) {
   await addColumnIfMissing(db, "traders", "updated_at", "TEXT");
   await addColumnIfMissing(db, "traders", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
 
-  await addColumnIfMissing(db, "vehicles", "type", "TEXT");
-  await addColumnIfMissing(db, "vehicles", "notes", "TEXT");
-  await addColumnIfMissing(db, "vehicles", "created_at", "TEXT");
-  await addColumnIfMissing(db, "vehicles", "updated_at", "TEXT");
-  await addColumnIfMissing(db, "vehicles", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
-
   await addColumnIfMissing(db, "drivers", "phone", "TEXT");
-  await addColumnIfMissing(db, "drivers", "vehicle_id", "TEXT REFERENCES vehicles(id)");
-  const addedVehiclePlate = await addColumnIfMissing(db, "drivers", "vehicle_plate", "TEXT");
+  await addColumnIfMissing(db, "drivers", "vehicle_plate", "TEXT");
   await addColumnIfMissing(db, "drivers", "notes", "TEXT");
   await addColumnIfMissing(db, "drivers", "created_at", "TEXT");
   await addColumnIfMissing(db, "drivers", "updated_at", "TEXT");
   await addColumnIfMissing(db, "drivers", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
 
-// ─── تحديث جدول بنود الفواتير (Invoice Items) ليكون مطابقاً للـ SQL ───
-  await addColumnIfMissing(db, "invoice_items", "invoice_id", "TEXT NOT NULL"); // لاحظ: يجب أن يكون موجوداً
+  await addColumnIfMissing(db, "invoice_items", "invoice_id", "TEXT NOT NULL");
   await addColumnIfMissing(db, "invoice_items", "product_name", "TEXT NOT NULL");
   await addColumnIfMissing(db, "invoice_items", "gross_weight", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "invoice_items", "basket_count", "INTEGER NOT NULL DEFAULT 0");
@@ -190,22 +179,8 @@ async function ensureDesktopSchema(db) {
   await addColumnIfMissing(db, "invoice_items", "updated_at", "TEXT NOT NULL");
   await addColumnIfMissing(db, "invoice_items", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
 
-  if (addedVehiclePlate || await tableHasColumn(db, "drivers", "vehicle_plate")) {
-    await db.execute(`
-      UPDATE drivers
-      SET vehicle_plate = (
-        SELECT v.plate
-        FROM vehicles v
-        WHERE v.id = drivers.vehicle_id
-          AND v.is_deleted = 0
-      )
-      WHERE vehicle_plate IS NULL AND vehicle_id IS NOT NULL
-    `);
-  }
-
   await addColumnIfMissing(db, "invoices", "trader_id", "TEXT REFERENCES traders(id)");
   await addColumnIfMissing(db, "invoices", "driver_id", "TEXT REFERENCES drivers(id)");
-  await addColumnIfMissing(db, "invoices", "vehicle_id", "TEXT REFERENCES vehicles(id)");
   await addColumnIfMissing(db, "invoices", "date", "TEXT");
   await addColumnIfMissing(db, "invoices", "status", "TEXT NOT NULL DEFAULT 'draft'");
   await addColumnIfMissing(db, "invoices", "total_final", "INTEGER NOT NULL DEFAULT 0");
@@ -216,7 +191,6 @@ async function ensureDesktopSchema(db) {
   await addColumnIfMissing(db, "invoices", "updated_at", "TEXT");
   await addColumnIfMissing(db, "invoices", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
 
-  await addColumnIfMissing(db, "invoice_items", "basket_number", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "payments", "trader_id", "TEXT REFERENCES traders(id)");
   await addColumnIfMissing(db, "payments", "amount", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "payments", "date", "TEXT");
@@ -254,7 +228,6 @@ export async function getTraders() {
   if (!isTauriRuntime()) {
     return getFallbackRecords("traders").filter(item => item.is_deleted !== 1).sort((a, b) => a.name.localeCompare(b.name));
   }
-  // this what works in the app
   const db = await getDb();
   return db.select("SELECT * FROM traders WHERE is_deleted=0 ORDER BY name");
 }
@@ -304,75 +277,18 @@ export async function deleteTrader(id) {
   await db.execute("UPDATE traders SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
 }
 
-// ─── Vehicles ───────────────────────────────────────────────────────────────
-export async function getVehicles() {
-  if (!isTauriRuntime()) {
-    return getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).sort((a, b) => a.plate.localeCompare(b.plate));
-  }
-  const db = await getDb();
-  return db.select("SELECT * FROM vehicles WHERE is_deleted=0 ORDER BY plate");
-}
-
-export async function createVehicle({ plate, type = null, notes = null }) {
-  if (!isTauriRuntime()) {
-    const store = ensureFallbackStore();
-    const id = uuid(); const ts = now();
-    store.vehicles.push({ id, plate, type, notes, is_deleted: 0, created_at: ts, updated_at: ts });
-    persistFallbackStore(store);
-    return id;
-  }
-  const db = await getDb();
-  const id = uuid(); const ts = now();
-  await db.execute(
-    "INSERT INTO vehicles (id, plate, type, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-    [id, plate, type, notes, ts, ts]
-  );
-  return id;
-}
-
-export async function updateVehicle(id, fields) {
-  if (!isTauriRuntime()) {
-    updateFallbackRecord("vehicles", id, row => ({ ...row, plate: fields.plate, type: fields.type ?? null, notes: fields.notes ?? null, updated_at: now() }));
-    return;
-  }
-  const db = await getDb();
-  await db.execute(
-    "UPDATE vehicles SET plate=?, type=?, notes=?, updated_at=? WHERE id=?",
-    [fields.plate, fields.type ?? null, fields.notes ?? null, now(), id]
-  );
-}
-
-export async function deleteVehicle(id) {
-  if (!isTauriRuntime()) {
-    updateFallbackRecord("vehicles", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
-    return;
-  }
-  const db = await getDb();
-  await db.execute("UPDATE vehicles SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
-}
-
-// ─── Drivers ────────────────────────────────────────────────────────────────
+// ─── Drivers (رقم المركبة: حقل نصي بسيط vehicle_plate) ──────────────────────
 export async function getDrivers() {
   if (!isTauriRuntime()) {
     return getFallbackRecords("drivers")
       .filter(item => item.is_deleted !== 1)
-      .map(driver => ({ ...driver, vehicle_plate: driver.vehicle_plate ?? null }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
   const db = await getDb();
-  if (await hasColumn("drivers", "vehicle_plate")) {
-    return db.select(`
-      SELECT id, name, phone, vehicle_plate, notes, created_at, updated_at, is_deleted
-      FROM drivers
-      WHERE is_deleted=0 ORDER BY name
-    `);
-  }
-
   return db.select(`
-    SELECT d.id, d.name, d.phone, v.plate as vehicle_plate, d.notes, d.created_at, d.updated_at, d.is_deleted
-    FROM drivers d
-    LEFT JOIN vehicles v ON d.vehicle_id = v.id
-    WHERE d.is_deleted=0 ORDER BY d.name
+    SELECT id, name, phone, vehicle_plate, notes, created_at, updated_at, is_deleted
+    FROM drivers
+    WHERE is_deleted=0 ORDER BY name
   `);
 }
 
@@ -386,30 +302,10 @@ export async function createDriver({ name, phone = null, vehicle_plate = null, n
   }
   const db = await getDb();
   const id = uuid(); const ts = now();
-  if (await hasColumn("drivers", "vehicle_plate")) {
-    await db.execute(
-      "INSERT INTO drivers (id, name, phone, vehicle_plate, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [id, name, phone, vehicle_plate, notes, ts, ts]
-    );
-  } else {
-    let vehicleId = null;
-    if (vehicle_plate?.trim()) {
-      const plate = vehicle_plate.trim();
-      const rows = await db.select("SELECT id FROM vehicles WHERE plate=? AND is_deleted=0 LIMIT 1", [plate]);
-      vehicleId = rows[0]?.id ?? null;
-      if (!vehicleId) {
-        vehicleId = uuid();
-        await db.execute(
-          "INSERT INTO vehicles (id, plate, created_at, updated_at) VALUES (?, ?, ?, ?)",
-          [vehicleId, plate, ts, ts]
-        );
-      }
-    }
-    await db.execute(
-      "INSERT INTO drivers (id, name, phone, vehicle_id, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [id, name, phone, vehicleId, notes, ts, ts]
-    );
-  }
+  await db.execute(
+    "INSERT INTO drivers (id, name, phone, vehicle_plate, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [id, name, phone, vehicle_plate, notes, ts, ts]
+  );
   return id;
 }
 
@@ -419,31 +315,10 @@ export async function updateDriver(id, fields) {
     return;
   }
   const db = await getDb();
-  if (await hasColumn("drivers", "vehicle_plate")) {
-    await db.execute(
-      "UPDATE drivers SET name=?, phone=?, vehicle_plate=?, notes=?, updated_at=? WHERE id=?",
-      [fields.name, fields.phone ?? null, fields.vehicle_plate ?? null, fields.notes ?? null, now(), id]
-    );
-  } else {
-    let vehicleId = null;
-    if (fields.vehicle_plate?.trim()) {
-      const plate = fields.vehicle_plate.trim();
-      const rows = await db.select("SELECT id FROM vehicles WHERE plate=? AND is_deleted=0 LIMIT 1", [plate]);
-      vehicleId = rows[0]?.id ?? null;
-      if (!vehicleId) {
-        vehicleId = uuid();
-        const ts = now();
-        await db.execute(
-          "INSERT INTO vehicles (id, plate, created_at, updated_at) VALUES (?, ?, ?, ?)",
-          [vehicleId, plate, ts, ts]
-        );
-      }
-    }
-    await db.execute(
-      "UPDATE drivers SET name=?, phone=?, vehicle_id=?, notes=?, updated_at=? WHERE id=?",
-      [fields.name, fields.phone ?? null, vehicleId, fields.notes ?? null, now(), id]
-    );
-  }
+  await db.execute(
+    "UPDATE drivers SET name=?, phone=?, vehicle_plate=?, notes=?, updated_at=? WHERE id=?",
+    [fields.name, fields.phone ?? null, fields.vehicle_plate ?? null, fields.notes ?? null, now(), id]
+  );
 }
 
 export async function deleteDriver(id) {
@@ -460,7 +335,7 @@ export async function getInvoices({ from = null, to = null, status = null, trade
   if (!isTauriRuntime()) {
     const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
     const drivers = new Map(getFallbackRecords("drivers").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
-    const vehicles = new Map(getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+
     return getFallbackRecords("invoices")
       .filter(item => item.is_deleted !== 1)
       .filter(item => !from || item.date >= from)
@@ -471,7 +346,7 @@ export async function getInvoices({ from = null, to = null, status = null, trade
         ...item,
         trader_name: traders.get(item.trader_id)?.name ?? null,
         driver_name: drivers.get(item.driver_id)?.name ?? null,
-        vehicle_plate: vehicles.get(item.vehicle_id)?.plate ?? null,
+        vehicle_plate: drivers.get(item.driver_id)?.vehicle_plate ?? null,
       }))
       .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.created_at || "").localeCompare(a.created_at || ""));
   }
@@ -483,11 +358,10 @@ export async function getInvoices({ from = null, to = null, status = null, trade
   if (status)    { where += " AND i.status = ?"; params.push(status); }
   if (trader_id) { where += " AND i.trader_id = ?"; params.push(trader_id); }
   return db.select(`
-    SELECT i.*, t.name as trader_name, d.name as driver_name, v.plate as vehicle_plate
+    SELECT i.*, t.name as trader_name, d.name as driver_name, d.vehicle_plate as vehicle_plate
     FROM invoices i
     LEFT JOIN traders t ON i.trader_id = t.id
     LEFT JOIN drivers d ON i.driver_id = d.id
-    LEFT JOIN vehicles v ON i.vehicle_id = v.id
     WHERE ${where} ORDER BY i.date DESC, i.created_at DESC
   `, params);
 }
@@ -498,29 +372,32 @@ export async function getInvoice(id) {
     if (!invoice) return null;
     const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
     const drivers = new Map(getFallbackRecords("drivers").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
-    const vehicles = new Map(getFallbackRecords("vehicles").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
-    return { ...invoice, trader_name: traders.get(invoice.trader_id)?.name ?? null, driver_name: drivers.get(invoice.driver_id)?.name ?? null, vehicle_plate: vehicles.get(invoice.vehicle_id)?.plate ?? null };
+
+    return {
+      ...invoice,
+      trader_name: traders.get(invoice.trader_id)?.name ?? null,
+      driver_name: drivers.get(invoice.driver_id)?.name ?? null,
+      vehicle_plate: drivers.get(invoice.driver_id)?.vehicle_plate ?? null,
+    };
   }
   const db = await getDb();
   const rows = await db.select(`
-    SELECT i.*, t.name as trader_name, d.name as driver_name, v.plate as vehicle_plate
+    SELECT i.*, t.name as trader_name, d.name as driver_name, d.vehicle_plate as vehicle_plate
     FROM invoices i
     LEFT JOIN traders t ON i.trader_id = t.id
     LEFT JOIN drivers d ON i.driver_id = d.id
-    LEFT JOIN vehicles v ON i.vehicle_id = v.id
     WHERE i.id=? AND i.is_deleted=0
   `, [id]);
   return rows[0] ?? null;
 }
 
-export async function createInvoice({ trader_id, driver_id = null, vehicle_id = null, date, notes = null }) {
+export async function createInvoice({ trader_id, driver_id = null, date, notes = null }) {
   if (!isTauriRuntime()) {
     const id = uuid(); const ts = now();
     pushFallbackRecord("invoices", {
       id,
       trader_id,
       driver_id,
-      vehicle_id,
       date,
       status: "draft",
       total_final: 0,
@@ -536,9 +413,9 @@ export async function createInvoice({ trader_id, driver_id = null, vehicle_id = 
   const db = await getDb();
   const id = uuid(); const ts = now();
   await db.execute(
-    `INSERT INTO invoices (id, trader_id, driver_id, vehicle_id, date, status, total_final, paid_amount, remaining, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', 0, 0, 0, ?, ?, ?)` ,
-    [id, trader_id, driver_id, vehicle_id, date, notes, ts, ts]
+    `INSERT INTO invoices (id, trader_id, driver_id, date, status, total_final, paid_amount, remaining, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'draft', 0, 0, 0, ?, ?, ?)`,
+    [id, trader_id, driver_id, date, notes, ts, ts]
   );
   return id;
 }
@@ -555,7 +432,6 @@ export async function updateInvoiceTotals(id, { total_final, paid_amount, remain
   );
 }
 
-/** ترحيل الفاتورة: تغيير الحالة + إضافة الباقي لدين التاجر + تسجيل في سجل المعاملات */
 export async function postInvoice(invoiceId) {
   if (!isTauriRuntime()) {
     const ts = now();
@@ -586,7 +462,6 @@ export async function postInvoice(invoiceId) {
     );
   }
 
-  // تسجيل في سجل المعاملات
   await db.execute(
     `INSERT INTO transactions_log (id, type, ref_id, trader_id, amount, description, date, created_at)
      VALUES (?, 'invoice_posted', ?, ?, ?, ?, ?, ?)`,
@@ -595,7 +470,6 @@ export async function postInvoice(invoiceId) {
   );
 }
 
-/** حركة عكسية للفاتورة المُرحّلة */
 export async function reverseInvoice(invoiceId) {
   if (!isTauriRuntime()) {
     const ts = now();
@@ -748,27 +622,43 @@ export async function deleteInvoiceItem(id) {
 }
 
 // ─── Payments ───────────────────────────────────────────────────────────────
-export async function getPayments({ trader_id = null } = {}) {
+export async function getPayments(filters = {}) {
+  const { from, to } = filters;
+
+  // 1. التعامل مع بيئة المتصفح والـ Fallback برمجياً
   if (!isTauriRuntime()) {
-    const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
     return getFallbackRecords("payments")
-      .filter(item => item.is_deleted !== 1)
-      .filter(item => !trader_id || item.trader_id === trader_id)
-      .map(item => ({ ...item, trader_name: traders.get(item.trader_id)?.name ?? null }))
+      .filter(p => {
+        if (p.is_deleted === 1) return false;
+        if (!p.date) return false;
+        // قش الوقت للمقارنة النصية الصافية YYYY-MM-DD
+        const pDate = p.date.split("T")[0]; 
+        if (from && pDate < from) return false;
+        if (to && pDate > to) return false;
+        return true;
+      })
       .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   }
-  const db = await getDb();
-  let where = "p.is_deleted=0";
-  const params = [];
-  if (trader_id) { where += " AND p.trader_id=?"; params.push(trader_id); }
-  return db.select(`
-    SELECT p.*, t.name as trader_name
-    FROM payments p
-    LEFT JOIN traders t ON p.trader_id = t.id
-    WHERE ${where} ORDER BY p.date DESC
-  `, params);
-}
 
+  // 2. التعامل مع بيئة Tauri الحقيقية باستخدام SQLite دالة date() لقشر الوقت
+  const db = await getDb(); // 👈 جلب كائن قاعدة البيانات الصحيح هنا
+  
+  let query = "SELECT * FROM payments WHERE is_deleted = 0";
+  const params = [];
+
+  if (from) {
+    query += " AND date(date) >= date(?)";
+    params.push(from);
+  }
+  if (to) {
+    query += " AND date(date) <= date(?)";
+    params.push(to);
+  }
+
+  query += " ORDER BY date DESC";
+
+  return db.select(query, params);
+}
 export async function createPayment({ trader_id, amount, date, notes = null }) {
   if (!isTauriRuntime()) {
     const id = uuid(); const ts = now();
@@ -795,6 +685,142 @@ export async function createPayment({ trader_id, amount, date, notes = null }) {
   return id;
 }
 
+// جلب الفواتير أو الديون غير المسددة لتاجر معين
+export async function getTraderUnpaidInvoices(traderId) {
+  if (!isTauriRuntime()) {
+    const invoices = getFallbackRecords("invoices")
+      .filter(inv => inv.trader_id === traderId && inv.is_deleted !== 1 && inv.remaining > 0);
+    const items = getFallbackRecords("invoice_items").filter(item => item.is_deleted !== 1);
+
+    return invoices.map(inv => {
+      const invItems = items.filter(it => it.invoice_id === inv.id);
+      const productSummary = invItems.map(it => `${it.product_name} (${it.basket_count} صنديق/كيس)`).join(" - ");
+      return {
+        ...inv,
+        product_summary: productSummary || inv.notes || "قيد دين يدوي"
+      };
+    });
+  }
+
+  const db = await getDb();
+  return db.select(`
+    SELECT 
+      i.*,
+      (SELECT GROUP_CONCAT(ii.product_name || ' (' || ii.basket_count || ')', ' - ') 
+       FROM invoice_items ii WHERE ii.invoice_id = i.id AND ii.is_deleted = 0) as product_summary
+    FROM invoices i
+    WHERE i.trader_id = ? AND i.is_deleted = 0 AND i.remaining > 0 AND i.status = 'posted'
+    ORDER BY i.date DESC
+  `, [traderId]);
+}
+
+// تسديد فاتورة محددة
+export async function paySpecificInvoice({ trader_id, invoice_id, amount, date, notes }) {
+  const ts = now();
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("invoices", invoice_id, inv => {
+      const newRemaining = Number(inv.remaining) - Number(amount);
+      const newPaid = Number(inv.paid_amount) + Number(amount);
+      return { ...inv, remaining: newRemaining, paid_amount: newPaid, updated_at: ts };
+    });
+
+    updateFallbackRecord("traders", trader_id, t => ({
+      ...t,
+      debt_fils: Number(t.debt_fils) - Number(amount),
+      updated_at: ts
+    }));
+
+    const pId = uuid();
+    pushFallbackRecord("payments", { id: pId, trader_id, amount, date, notes: (notes || "") + ` (تسديد قائمة)`, is_deleted: 0, created_at: ts, updated_at: ts });
+    pushFallbackRecord("transactions_log", { id: uuid(), type: "payment", ref_id: pId, trader_id, amount, description: `تسديد جزء/كل من قائمة`, date, created_at: ts });
+    return;
+  }
+
+  const db = await getDb();
+  await db.execute(
+    "UPDATE invoices SET paid_amount = paid_amount + ?, remaining = remaining - ?, updated_at = ? WHERE id = ?",
+    [amount, amount, ts, invoice_id]
+  );
+  await db.execute(
+    "UPDATE traders SET debt_fils = debt_fils - ?, updated_at = ? WHERE id = ?",
+    [amount, ts, trader_id]
+  );
+  const paymentId = uuid();
+  await db.execute(
+    "INSERT INTO payments (id, trader_id, amount, date, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [paymentId, trader_id, amount, date, notes, ts, ts]
+  );
+  await db.execute(
+    `INSERT INTO transactions_log (id, type, ref_id, trader_id, amount, description, date, created_at)
+     VALUES (?, 'payment', ?, ?, ?, ?, ?, ?)`,
+    [uuid(), paymentId, trader_id, amount, notes, date, ts]
+  );
+}
+
+// إضافة دين يدوي
+export async function createManualDebtInvoice({ trader_id, amount, date, notes }) {
+  const ts = now();
+  const invoiceId = uuid();
+
+  if (!isTauriRuntime()) {
+    pushFallbackRecord("invoices", {
+      id: invoiceId,
+      trader_id,
+      driver_id: null,
+      date,
+      status: "posted",
+      total_final: amount,
+      paid_amount: 0,
+      remaining: amount,
+      notes: notes || "دين يدوي مباشر",
+      is_deleted: 0,
+      created_at: ts,
+      updated_at: ts,
+    });
+
+    updateFallbackRecord("traders", trader_id, row => ({
+      ...row,
+      debt_fils: Number(row.debt_fils || 0) + Number(amount || 0),
+      updated_at: ts
+    }));
+
+    pushFallbackRecord("transactions_log", {
+      id: uuid(),
+      type: "manual_debt",
+      ref_id: invoiceId,
+      trader_id,
+      amount: Number(amount || 0),
+      description: notes || "قيد دين يدوي (قائمة مستقلة)",
+      date,
+      created_at: ts,
+      is_deleted: 0
+    });
+
+    return invoiceId;
+  }
+
+  const db = await getDb();
+  
+  await db.execute(
+    `INSERT INTO invoices (id, trader_id, date, status, total_final, paid_amount, remaining, notes, created_at, updated_at, is_deleted)
+     VALUES (?, ?, ?, 'posted', ?, 0, ?, ?, ?, ?, 0)`,
+    [invoiceId, trader_id, date, Number(amount || 0), Number(amount || 0), notes || "دين يدوي مباشر", ts, ts]
+  );
+
+  await db.execute(
+    "UPDATE traders SET debt_fils = debt_fils + ?, updated_at=? WHERE id=?",
+    [Number(amount || 0), ts, trader_id]
+  );
+
+  await db.execute(
+    `INSERT INTO transactions_log (id, type, ref_id, trader_id, amount, description, date, created_at, is_deleted)
+     VALUES (?, 'manual_debt', ?, ?, ?, ?, ?, ?, 0)`,
+    [uuid(), invoiceId, trader_id, Number(amount || 0), notes || "قيد دين يدوي (قائمة مستقلة)", date, ts]
+  );
+
+  return invoiceId;
+}
+
 // ─── Transactions Log ────────────────────────────────────────────────────────
 export async function getTransactions({ from = null, to = null, trader_id = null } = {}) {
   if (!isTauriRuntime()) {
@@ -804,16 +830,24 @@ export async function getTransactions({ from = null, to = null, trader_id = null
       .filter(item => !from || item.date >= from)
       .filter(item => !to || item.date <= to)
       .filter(item => !trader_id || item.trader_id === trader_id)
-      .map(item => ({ ...item, trader_name: traders.get(item.trader_id)?.name ?? null }))
+      // تأكيد دمج الحقل وتوفيره هنا كـ Fallback لحماية الكود من الـ undefined
+      .map(item => ({ 
+        ...item, 
+        trader_name: traders.get(item.trader_id)?.name ?? null,
+        notes: item.notes ?? "" 
+      }))
       .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
       .slice(0, 1000);
   }
+
   const db = await getDb();
   let where = "tl.is_deleted=0";
   const params = [];
   if (from)      { where += " AND tl.date >= ?"; params.push(from); }
   if (to)        { where += " AND tl.date <= ?"; params.push(to); }
   if (trader_id) { where += " AND tl.trader_id=?"; params.push(trader_id); }
+
+  // قمنا بالإبقاء على tl.* ولكن يفضل دائماً التأكد من أن جدول قاعدة البيانات المحلي (SQLite) يحتوي على حقل notes
   return db.select(`
     SELECT tl.*, t.name as trader_name
     FROM transactions_log tl
@@ -821,7 +855,6 @@ export async function getTransactions({ from = null, to = null, trader_id = null
     WHERE ${where} ORDER BY tl.created_at DESC LIMIT 1000
   `, params);
 }
-
 // ─── Settings ────────────────────────────────────────────────────────────────
 export async function getSetting(key) {
   if (!isTauriRuntime()) {
@@ -854,78 +887,4 @@ export async function getAllSettings() {
   const db = await getDb();
   const rows = await db.select("SELECT key, value FROM settings");
   return Object.fromEntries(rows.map(r => [r.key, r.value]));
-}
-
-// ─── Dashboard Stats ─────────────────────────────────────────────────────────
-export async function getDashboardStats({ from = null, to = null } = {}) {
-  if (!isTauriRuntime()) {
-    const traders = getFallbackRecords("traders").filter(item => item.is_deleted !== 1);
-    const invoices = getFallbackRecords("invoices").filter(item => item.is_deleted !== 1 && (!from || item.date >= from) && (!to || item.date <= to));
-    const postedInvoices = invoices.filter(item => item.status === "posted");
-    const invoiceItems = getFallbackRecords("invoice_items").filter(item => item.is_deleted !== 1);
-    const postedItems = invoiceItems.filter(item => postedInvoices.some(inv => inv.id === item.invoice_id));
-    const topDebtors = traders.filter(item => Number(item.debt_fils || 0) > 0).sort((a, b) => Number(b.debt_fils || 0) - Number(a.debt_fils || 0)).slice(0, 5);
-    const topProducts = postedItems.reduce((acc, item) => {
-      const key = item.product_name || "غير محدد";
-      acc[key] ??= { product_name: key, total_weight: 0, total_amount: 0 };
-      acc[key].total_weight += Number(item.net_weight || 0);
-      acc[key].total_amount += Number(item.final_amount || 0);
-      return acc;
-    }, {});
-    const salesByDay = Object.entries(postedInvoices.reduce((acc, inv) => {
-      acc[inv.date] = (acc[inv.date] || 0) + Number(inv.total_final || 0);
-      return acc;
-    }, {})).map(([date, total]) => ({ date, total })).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 30);
-
-    return {
-      tradersCount: traders.length,
-      totalSales: postedInvoices.reduce((s, inv) => s + Number(inv.total_final || 0), 0),
-      totalComm: postedItems.reduce((s, item) => s + Number(item.commission_value || 0), 0),
-      totalPort: postedItems.reduce((s, item) => s + Number(item.porterage || 0), 0),
-      totalDebt: traders.reduce((s, item) => s + Number(item.debt_fils || 0), 0),
-      draftCount: invoices.filter(item => item.status === "draft").length,
-      postedCount: postedInvoices.length,
-      topDebtors: topDebtors.map(item => ({ name: item.name, debt_fils: Number(item.debt_fils || 0) })),
-      topProducts: Object.values(topProducts).sort((a, b) => b.total_amount - a.total_amount).slice(0, 5),
-      salesByDay,
-    };
-  }
-  const db = await getDb();
-  let dateFilter = "";
-  const p = [];
-  if (from) { dateFilter += " AND date >= ?"; p.push(from); }
-  if (to)   { dateFilter += " AND date <= ?"; p.push(to); }
-
-  const [traders]       = await db.select("SELECT COUNT(*) as c FROM traders WHERE is_deleted=0");
-  const [totalSales]    = await db.select(`SELECT COALESCE(SUM(total_final),0) as c FROM invoices WHERE is_deleted=0 AND status='posted'${dateFilter}`, p);
-  const [totalComm]     = await db.select(`SELECT COALESCE(SUM(ii.commission_value),0) as c FROM invoice_items ii JOIN invoices i ON ii.invoice_id=i.id WHERE ii.is_deleted=0 AND i.status='posted' AND i.is_deleted=0${dateFilter.replace(/date/g,"i.date")}`, p);
-  const [totalPort]     = await db.select(`SELECT COALESCE(SUM(ii.porterage),0) as c FROM invoice_items ii JOIN invoices i ON ii.invoice_id=i.id WHERE ii.is_deleted=0 AND i.status='posted' AND i.is_deleted=0${dateFilter.replace(/date/g,"i.date")}`, p);
-  const [totalDebt]     = await db.select("SELECT COALESCE(SUM(debt_fils),0) as c FROM traders WHERE is_deleted=0");
-  const [draftCount]    = await db.select("SELECT COUNT(*) as c FROM invoices WHERE is_deleted=0 AND status='draft'");
-  const [postedCount]   = await db.select(`SELECT COUNT(*) as c FROM invoices WHERE is_deleted=0 AND status='posted'${dateFilter}`, p);
-  const topDebtors      = await db.select("SELECT name, debt_fils FROM traders WHERE is_deleted=0 AND debt_fils>0 ORDER BY debt_fils DESC LIMIT 5");
-  const topProducts     = await db.select(`
-    SELECT ii.product_name, COALESCE(SUM(ii.net_weight),0) as total_weight, COALESCE(SUM(ii.final_amount),0) as total_amount
-    FROM invoice_items ii JOIN invoices i ON ii.invoice_id=i.id
-    WHERE ii.is_deleted=0 AND i.status='posted' AND i.is_deleted=0${dateFilter.replace(/date/g,"i.date")}
-    GROUP BY ii.product_name ORDER BY total_amount DESC LIMIT 5
-  `, p);
-  const salesByDay      = await db.select(`
-    SELECT i.date, COALESCE(SUM(i.total_final),0) as total
-    FROM invoices i WHERE i.is_deleted=0 AND i.status='posted'${dateFilter}
-    GROUP BY i.date ORDER BY i.date ASC LIMIT 30
-  `, p);
-
-  return {
-    tradersCount:   traders.c,
-    totalSales:     totalSales.c,
-    totalComm:      totalComm.c,
-    totalPort:      totalPort.c,
-    totalDebt:      totalDebt.c,
-    draftCount:     draftCount.c,
-    postedCount:    postedCount.c,
-    topDebtors,
-    topProducts,
-    salesByDay,
-  };
 }

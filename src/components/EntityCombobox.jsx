@@ -1,24 +1,23 @@
 import { useState, useRef, useEffect } from "react";
 import { Check, ChevronsUpDown, Plus } from "lucide-react";
 
-/**
- * EntityCombobox — بحث + كتابة اسم جديد + Find-or-Create
- * Props:
- *   items        — [{ id, label }]
- *   value        — id المحدد حالياً
- *   onChange     — (id, label) => void
- *   placeholder  — نص placeholder
- *   disabled     — boolean
- */
 export default function EntityCombobox({ items = [], value, onChange, placeholder = "اختر أو اكتب...", disabled = false }) {
   const [open, setOpen]       = useState(false);
   const [query, setQuery]     = useState("");
+  // ─── جديد: ذاكرة محلية لاسم تمت كتابته كـ "جديد" ولم يُحفظ بعد ───
+  const [pendingLabel, setPendingLabel] = useState(null);
   const inputRef              = useRef(null);
   const containerRef          = useRef(null);
 
-  const selectedLabel = items.find(i => i.id === value)?.label ?? "";
+  // ─── إذا value أصبح id حقيقي (بعد الحفظ)، نمسح الذاكرة المحلية ───
+  useEffect(() => {
+    if (value) setPendingLabel(null);
+  }, [value]);
 
-  // إغلاق عند النقر خارج المكوّن
+  const matchedItem = items.find(i => i.id === value);
+  // ─── الأولوية: عنصر حقيقي من القائمة، وإلا الاسم المعلّق (جديد)، وإلا فاضي ───
+  const selectedLabel = matchedItem?.label ?? (value === null ? pendingLabel : "") ?? "";
+
   useEffect(() => {
     function handleClick(e) {
       if (containerRef.current && !containerRef.current.contains(e.target)) {
@@ -37,6 +36,7 @@ export default function EntityCombobox({ items = [], value, onChange, placeholde
   const exactMatch = items.find(i => i.label === query.trim());
 
   function handleSelect(item) {
+    setPendingLabel(null); // عنصر حقيقي، لا حاجة للذاكرة المؤقتة
     onChange(item.id, item.label);
     setOpen(false);
     setQuery("");
@@ -44,7 +44,9 @@ export default function EntityCombobox({ items = [], value, onChange, placeholde
 
   function handleAddNew() {
     if (!query.trim()) return;
-    onChange(null, query.trim()); // id=null يعني "جديد" → findOrCreate يُنفَّذ عند الحفظ
+    const newLabel = query.trim();
+    setPendingLabel(newLabel); // ← نحفظ الاسم محلياً للعرض الفوري
+    onChange(null, newLabel);
     setOpen(false);
     setQuery("");
   }
@@ -57,7 +59,6 @@ export default function EntityCombobox({ items = [], value, onChange, placeholde
 
   return (
     <div ref={containerRef} className="relative w-full">
-      {/* زر العرض */}
       <button
         type="button"
         disabled={disabled}
@@ -70,7 +71,6 @@ export default function EntityCombobox({ items = [], value, onChange, placeholde
         <ChevronsUpDown size={14} className="text-muted-foreground shrink-0 ms-2" />
       </button>
 
-      {/* القائمة المنسدلة */}
       {open && (
         <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover shadow-lg">
           <div className="p-2 border-b border-border">

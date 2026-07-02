@@ -1,28 +1,29 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Pencil, Trash2, X, CreditCard } from "lucide-react";
-import { getTraders, createTrader, updateTrader, deleteTrader, createPayment } from "../lib/db.js";
-import { formatMoney, fromInt, toInt } from "../lib/money.js";
+import { Plus, Pencil, Trash2, X, CreditCard, Scale, ShoppingBag } from "lucide-react";
+// استبدال الدالة القديمة بالدالة الجديدة القائمة على القوائم والفواتير المستقلة
+import { getTraders, createTrader, updateTrader, deleteTrader, createManualDebtInvoice } from "../lib/db.js";
+import { formatMoney, toInt } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 
 const EMPTY_FORM = { name: "", phone: "", notes: "" };
-const EMPTY_PAY  = { amount: "", date: new Date().toISOString().slice(0, 10), notes: "" };
+const EMPTY_DEBT = { amount: "", date: new Date().toISOString().slice(0, 10), productName: "", notes: "" };
 
 export default function Traders() {
   const [traders, setTraders]       = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
 
-  // نموذج إضافة/تعديل
+  // نموذج إضافة/تعديل تاجر
   const [showForm, setShowForm]     = useState(false);
   const [editRow, setEditRow]       = useState(null);
   const [form, setForm]             = useState(EMPTY_FORM);
   const [saving, setSaving]         = useState(false);
 
-  // نموذج الدفعة
-  const [payRow, setPayRow]         = useState(null);
-  const [payForm, setPayForm]       = useState(EMPTY_PAY);
-  const [payingSaving, setPaySaving]= useState(false);
+  // نموذج إضافة دين جديد يدوي كقائمة مستقلة
+  const [debtRow, setDebtRow]       = useState(null);
+  const [debtForm, setDebtForm]     = useState(EMPTY_DEBT);
+  const [debtSaving, setDebtSaving] = useState(false);
 
   // حذف
   const [deleteRow, setDeleteRow]   = useState(null);
@@ -80,28 +81,38 @@ export default function Traders() {
     }
   }
 
-  function openPay(row) {
-    setPayRow(row);
-    setPayForm({ ...EMPTY_PAY, date: new Date().toISOString().slice(0, 10) });
+  // متحكمات إضافة الدين اليدوي الجديد (بشكل قائمة فاتورة)
+  function openDebt(row) {
+    setDebtRow(row);
+    setDebtForm({ ...EMPTY_DEBT, date: new Date().toISOString().slice(0, 10) });
   }
 
-  async function handlePay(e) {
+  async function handleDebt(e) {
     e.preventDefault();
-    if (!payForm.amount || Number(payForm.amount) <= 0) return;
-    setPaySaving(true);
+    if (!debtForm.amount || Number(debtForm.amount) <= 0) return;
+    if (!debtForm.productName.trim()) {
+      alert("يرجى تحديد السلعة أو تفاصيل القائمة المسببة للدين");
+      return;
+    }
+    
+    setDebtSaving(true);
     try {
-      await createPayment({
-        trader_id: payRow.id,
-        amount: toInt(payForm.amount),
-        date: payForm.date,
-        notes: payForm.notes || null,
+      // دمج اسم المادة مع الملاحظات ليظهر الملخص متناسقاً في كشف القوائم
+      const compositeNotes = `${debtForm.productName.trim()} ${debtForm.notes ? ' - ' + debtForm.notes.trim() : ''}`;
+      
+      await createManualDebtInvoice({
+        trader_id: debtRow.id,
+        amount: toInt(debtForm.amount),
+        date: debtForm.date,
+        notes: compositeNotes,
       });
-      setPayRow(null);
+      
+      setDebtRow(null);
       await load();
     } catch (e) {
-      alert("خطأ: " + e.message);
+      alert("خطأ أثناء حفظ قائمة الدين: " + e.message);
     } finally {
-      setPaySaving(false);
+      setDebtSaving(false);
     }
   }
 
@@ -110,7 +121,7 @@ export default function Traders() {
     { key: "phone",     label: "الهاتف" },
     {
       key: "debt_fils",
-      label: "الدين",
+      label: "إجمالي الدين الحالي",
       render: row => (
         <span className={row.debt_fils > 0 ? "text-destructive font-medium" : "text-muted-foreground"}>
           {formatMoney(row.debt_fils)}
@@ -125,7 +136,7 @@ export default function Traders() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold">التجار</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">إدارة التجار وأرصدة الديون</p>
+          <p className="text-sm text-muted-foreground mt-0.5">إدارة الحسابات العامة وفتح قوائم ديون يدوية مستقلة</p>
         </div>
         <button
           onClick={openAdd}
@@ -148,15 +159,15 @@ export default function Traders() {
           actions={row => (
             <div className="flex items-center gap-1">
               <button
-                onClick={() => openPay(row)}
-                title="تسجيل دفعة"
-                className="p-1.5 rounded hover:bg-accent text-green-600"
+                onClick={() => openDebt(row)}
+                title="إنشاء قائمة دين يدوية جديدة"
+                className="p-1.5 rounded hover:bg-accent text-orange-600"
               >
-                <CreditCard size={15} />
+                <Scale size={15} />
               </button>
               <button
                 onClick={() => openEdit(row)}
-                title="تعديل"
+                title="تعديل بيانات التاجر"
                 className="p-1.5 rounded hover:bg-accent"
               >
                 <Pencil size={15} />
@@ -173,12 +184,12 @@ export default function Traders() {
         />
       )}
 
-      {/* نموذج إضافة/تعديل */}
+      {/* نموذج إضافة/تعديل تاجر */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-background rounded-lg shadow-xl border border-border w-full max-w-md mx-4">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h3 className="font-semibold">{editRow ? "تعديل تاجر" : "إضافة تاجر"}</h3>
+              <h3 className="font-semibold">{editRow ? "تعديل بيانات التاجر" : "إضافة تاجر جديد"}</h3>
               <button onClick={() => setShowForm(false)} className="p-1 rounded hover:bg-accent">
                 <X size={16} />
               </button>
@@ -191,7 +202,7 @@ export default function Traders() {
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="اسم التاجر"
+                  placeholder="اسم التاجر الثلاثي"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -203,9 +214,8 @@ export default function Traders() {
                   placeholder="رقم الهاتف"
                 />
               </div>
-            
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">ملاحظات</label>
+                <label className="text-sm font-medium">ملاحظات عامة</label>
                 <textarea
                   value={form.notes}
                   onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
@@ -214,11 +224,9 @@ export default function Traders() {
                 />
               </div>
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 rounded-md border border-border text-sm hover:bg-accent">
-                  إلغاء
-                </button>
+                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 rounded-md border border-border text-sm hover:bg-accent">إلغاء</button>
                 <button type="submit" disabled={saving} className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-60">
-                  {saving ? "جارٍ الحفظ..." : "حفظ"}
+                  {saving ? "جارٍ الحفظ..." : "حفظ المعطيات"}
                 </button>
               </div>
             </form>
@@ -226,53 +234,72 @@ export default function Traders() {
         </div>
       )}
 
-      {/* نموذج الدفعة */}
-      {payRow && (
+      {/* نموذج فتح قائمة دين مستقلة جديدة (يدوية) */}
+      {debtRow && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-background rounded-lg shadow-xl border border-border w-full max-w-sm mx-4">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h3 className="font-semibold">تسجيل دفعة — {payRow.name}</h3>
-              <button onClick={() => setPayRow(null)} className="p-1 rounded hover:bg-accent"><X size={16} /></button>
+              <h3 className="font-semibold text-orange-600">فتح قائمة دين جديدة — {debtRow.name}</h3>
+              <button onClick={() => setDebtRow(null)} className="p-1 rounded hover:bg-accent"><X size={16} /></button>
             </div>
-            <form onSubmit={handlePay} className="p-5 flex flex-col gap-4">
+            <form onSubmit={handleDebt} className="p-5 flex flex-col gap-4">
               <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-                الدين الحالي: <span className="font-semibold text-destructive">{formatMoney(payRow.debt_fils)}</span>
+                إجمالي المديونية الحالية: <span className="font-semibold text-destructive">{formatMoney(debtRow.debt_fils)}</span>
               </div>
+              
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">المبلغ المدفوع *</label>
+                <label className="text-sm font-medium flex items-center gap-1">
+                  <ShoppingBag size={14} className="text-orange-500" /> السلعة / الخدمة المسببة للدين *
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={debtForm.productName}
+                  onChange={e => setDebtForm(f => ({ ...f, productName: e.target.value }))}
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring focus:border-orange-500"
+                  placeholder="مثال: موز، تفاح، أجور نقل وقيد..."
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">مبلغ القائمة الإجمالي *</label>
                 <input
                   required
                   type="number"
                   min="0.01"
                   step="0.01"
-                  value={payForm.amount}
-                  onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))}
-                  className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                  value={debtForm.amount}
+                  onChange={e => setDebtForm(f => ({ ...f, amount: e.target.value }))}
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring focus:border-orange-500"
                   placeholder="0.00"
                 />
               </div>
+
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">التاريخ *</label>
                 <input
                   required
                   type="date"
-                  value={payForm.date}
-                  onChange={e => setPayForm(f => ({ ...f, date: e.target.value }))}
+                  value={debtForm.date}
+                  onChange={e => setDebtForm(f => ({ ...f, date: e.target.value }))}
                   className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
+
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">ملاحظات</label>
+                <label className="text-sm font-medium">ملاحظات إضافية</label>
                 <input
-                  value={payForm.notes}
-                  onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))}
+                  value={debtForm.notes}
+                  onChange={e => setDebtForm(f => ({ ...f, notes: e.target.value }))}
                   className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="أي تفاصيل تود تسجيلها بالوصل..."
                 />
               </div>
+
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setPayRow(null)} className="px-4 py-2 rounded-md border border-border text-sm hover:bg-accent">إلغاء</button>
-                <button type="submit" disabled={payingSaving} className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-60">
-                  {payingSaving ? "جارٍ الحفظ..." : "تسجيل الدفعة"}
+                <button type="button" onClick={() => setDebtRow(null)} className="px-4 py-2 rounded-md border border-border text-sm hover:bg-accent">إلغاء</button>
+                <button type="submit" disabled={debtSaving} className="px-4 py-2 rounded-md bg-orange-600 text-white text-sm font-medium hover:bg-orange-700 disabled:opacity-60">
+                  {debtSaving ? "جارٍ تسجيل القائمة..." : "تأكيد وإدراج القائمة"}
                 </button>
               </div>
             </form>
@@ -284,8 +311,8 @@ export default function Traders() {
       <ConfirmDialog
         open={!!deleteRow}
         title="حذف تاجر"
-        message={`هل تريد حذف التاجر «${deleteRow?.name}»؟ لن يُحذف نهائياً.`}
-        confirmText="حذف"
+        message={`هل تريد حذف التاجر «${deleteRow?.name}»؟ لن يُحذف نهائياً من أرشيف النظام.`}
+        confirmText="تأكيد الحذف"
         danger
         onConfirm={handleDelete}
         onCancel={() => setDeleteRow(null)}
