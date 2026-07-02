@@ -1,22 +1,21 @@
 /**
- * money.js — حسابات آمنة بالأعداد الصحيحة
- * جميع القيم تُخزَّن مضروبة × 100 (أصغر وحدة) لتجنّب أخطاء Floating point
+ * money.js — حسابات IQD بالأعداد الصحيحة
+ * لا نستخدم وحدات أصغر من الدينار داخل التطبيق.
  */
 
-/** تحويل نص/رقم إلى عدد صحيح آمن (× 100) */
+/** تحويل نص/رقم إلى عدد صحيح بالدينار */
 export function toInt(val) {
   if (val === null || val === undefined || val === "") return 0;
-  return Math.round(Number(val)); // إزالة ضرب 100
+  return Math.round(Number(val));
 }
-/** تحويل عدد صحيح (× 100) إلى رقم عشري للعرض */
-/** تحويل القيمة للعرض (بدون كسور) */
+/** تحويل قيمة عددية للعرض كدينار كامل */
 export function fromInt(val) {
   return Math.round(Number(val) || 0);
 }
 
 /** تنسيق مبلغ للعرض بالعربية */
 export function formatMoney(intVal, currency = "د.ع") {
-  const n = Math.round(Number(intVal) || 0);
+  const n = fromInt(intVal);
   return n.toLocaleString("en-US") + (currency ? " " + currency : "");
 }
 
@@ -38,7 +37,7 @@ export function formatWeight(intVal) {
  *   porterage        — الحمالية (مبلغ رقمي)
  *   manualFinal      — مبلغ نهائي يدوي (اختياري، يتجاوز الحساب)
  *
- * المخرجات (كلها أعداد صحيحة × 100):
+ * المخرجات (كلها أعداد صحيحة بالدينار):
  *   netWeight, amountBefore, commissionValue, amountAfterComm, finalAmount
  */
 export function computeInvoiceItem({
@@ -50,7 +49,7 @@ export function computeInvoiceItem({
   const bWeight = Number(basketWeightEach) || 0;
   const priceI = Number(price) || 0;
   const commRate = Number(commissionRate) || 0;
-  const porterageI = Number(porterage) || 0;
+  const porterageI = toInt(porterage);
 
   const netWeight = grossW - (bCount * bWeight);
   const amountBefore = Math.round(netWeight * priceI);
@@ -58,7 +57,7 @@ export function computeInvoiceItem({
   const amountAfterComm = amountBefore + commissionValue;
   const autoFinal = amountAfterComm + porterageI;
   const finalAmount = (manualFinal !== null && manualFinal !== "")
-    ? Number(manualFinal)
+    ? toInt(manualFinal)
     : autoFinal;
 
   return {
@@ -89,8 +88,7 @@ export function computeInvoiceItem({
 }
 /** حساب إجماليات الفاتورة من بنودها */
 export function computeInvoiceTotals(items, paidAmount = 0) {
-  // تجميع الأرقام الخام فقط
-  const totalFinal = items.reduce((s, it) => s + (Number(it.final_amount) || 0), 0);
+  const totalFinal = items.reduce((s, it) => s + toInt(it.final_amount), 0);
   const paidI = toInt(paidAmount);
   const remaining = Math.max(0, totalFinal - paidI);
   

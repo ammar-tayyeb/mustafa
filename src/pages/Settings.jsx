@@ -148,17 +148,6 @@ async function handleBackup() {
                 <input value={marketName} onChange={e => setMarketName(e.target.value)} className={inp} placeholder="نظام إدارة العلوة" required />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">العملة الافتراضية</label>
-                <input value={currency} onChange={e => setCurrency(e.target.value)} className={inp} placeholder="د.ع" required />
-              </div>
-            </div>
-          </div>
-
-          {/* كارت إعدادات حساب الفاتورة */}
-          <div className="rounded-xl border border-border/80 bg-card p-5 shadow-sm flex flex-col gap-4 hover:shadow-md transition-shadow duration-200">
-            <h3 className="font-bold text-sm text-primary border-b border-border/40 pb-2">الحسابات والمعايير الافتراضية</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">نسبة العمولة الافتراضية (%)</label>
                 <div className="relative flex items-center">
                   <input type="number" min="0" max="100" step="0.1" value={commission}
@@ -167,18 +156,12 @@ async function handleBackup() {
                 </div>
                 <p className="text-[11px] text-muted-foreground leading-normal mt-0.5">تُطبق تلقائياً كنسبة مئوية عند إنشاء قوائم وبنود جديدة.</p>
               </div>
-              
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">وزن السلة الافتراضي (كجم)</label>
-                <div className="relative flex items-center">
-                  <input type="number" min="0" step="0.01" value={basketWeight}
-                    onChange={e => setBasketWeight(e.target.value)} className={inp} placeholder="50" required />
-                  <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none">كجم</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-normal mt-0.5">الوزن الفارغ الافتراضي للصندوق أو الكيس لخصمه من الوزن القائم.</p>
-              </div>
+             
             </div>
           </div>
+
+          {/* كارت إعدادات حساب الفاتورة */}
+          
 
           {/* زر الحفظ الأساسي بجاذبية بصرية ممتازة */}
           <button type="submit" disabled={saving}

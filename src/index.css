@@ -128,10 +128,10 @@ h1,
 h2 {
   font-family: var(--heading);
   font-weight: 500;
-  color: var(--text-h);
 }
 
 h1 {
+  color: #000;
   font-size: 56px;
   letter-spacing: -1.68px;
   margin: 32px 0;

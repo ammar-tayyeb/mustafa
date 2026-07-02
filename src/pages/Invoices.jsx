@@ -37,6 +37,12 @@ function cleanCommas(value) {
   return Number(cleaned) || 0;
 }
 
+function normalizeBasketWeightEach(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue === 0) return 0.5;
+  return numericValue > 10 ? numericValue / 100 : numericValue;
+}
+
 // ─── بند فارغ (مع قيمة افتراضية حقيقية للحمالية 250) ─────────────────────────
 function emptyItem() {
   return {
@@ -64,7 +70,7 @@ function ItemRow({ item, defaultCommission, onChange, onRemove }) {
   function field(key, rawVal) {
     let formattedVal = rawVal;
     
-    if (key === "grossWeight" || key === "price" || key === "manualFinal" || key === "basketCount" || key === "porterage" || key === "commissionRate") {
+    if (key === "grossWeight" || key === "price" || key === "manualFinal" || key === "basketCount" || key === "porterage" || key === "commissionRate" || key === "basketWeightEach") {
       const sanitized = rawVal.replace(/[^0-9.]/g, "");
       formattedVal = formatNumberWithCommas(sanitized);
     }
@@ -74,6 +80,7 @@ function ItemRow({ item, defaultCommission, onChange, onRemove }) {
     const cleanGross = cleanCommas(updated.grossWeight);
     const cleanPrice = cleanCommas(updated.price);
     const cleanBasketCount = cleanCommas(updated.basketCount);
+    const cleanBasketWeightEach = updated.basketWeightEach !== "" ? normalizeBasketWeightEach(updated.basketWeightEach) : 0.5;
     const cleanCommRate = updated.commissionRate !== "" ? cleanCommas(updated.commissionRate) : (defaultCommission / 100);
     const currentPorterageValue = updated.porterage !== "" ? cleanCommas(updated.porterage) : 250;
     
@@ -83,7 +90,7 @@ function ItemRow({ item, defaultCommission, onChange, onRemove }) {
     const computed = computeInvoiceItem({
       grossWeight:      cleanGross || "",
       basketCount:      cleanBasketCount || "",
-      basketWeightEach: updated.basketWeightEach || 0.5,
+      basketWeightEach: cleanBasketWeightEach,
       price:            cleanPrice || "",
       commissionRate:   cleanCommRate,
       porterage:        totalPorterage, 
@@ -121,12 +128,17 @@ function ItemRow({ item, defaultCommission, onChange, onRemove }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-1 items-end">
+      <div className="grid grid-cols-5 gap-1 items-end">
         <div>
           <span className={labelClass}>العمولة %</span>
           <input type="text" value={item.commissionRate}
             onChange={e => field("commissionRate", e.target.value)}
             className={textInputClass} placeholder={`${defaultCommission / 100}`} />
+        </div>
+        <div>
+          <span className={labelClass}>وزن السلة</span>
+          <input type="text" value={item.basketWeightEach}
+            onChange={e => field("basketWeightEach", e.target.value)} className={textInputClass} placeholder="0.5" />
         </div>
         <div>
           <span className={labelClass}>حمالية / سلة</span>
@@ -239,7 +251,7 @@ export default function Invoices() {
         product_name: it.product_name,
         grossWeight: formatNumberWithCommas(fromInt(it.gross_weight)),
         basketCount: formatNumberWithCommas(it.basket_count),
-        basketWeightEach: fromInt(it.basket_weight_each),
+        basketWeightEach: normalizeBasketWeightEach(it.basket_weight_each),
         price: formatNumberWithCommas(fromInt(it.price)),
         commissionRate: formatNumberWithCommas(fromInt(it.commission_rate)),
         porterage: it.basket_count > 0 ? formatNumberWithCommas((fromInt(it.porterage) / it.basket_count)) : "250", 
@@ -304,6 +316,7 @@ export default function Invoices() {
         const cleanGross = cleanCommas(item.grossWeight);
         const cleanPrice = cleanCommas(item.price);
         const cleanBasketCount = cleanCommas(item.basketCount);
+        const cleanBasketWeightEach = item.basketWeightEach !== "" ? normalizeBasketWeightEach(item.basketWeightEach) : 0.5;
         const cleanCommRate = item.commissionRate !== "" ? cleanCommas(item.commissionRate) : (defaultCommission / 100);
         const currentPorterageValue = item.porterage !== "" ? cleanCommas(item.porterage) : 250;
         
@@ -312,7 +325,7 @@ export default function Invoices() {
 
         const computed = computeInvoiceItem({
           grossWeight: cleanGross, basketCount: cleanBasketCount,
-          basketWeightEach: item.basketWeightEach || 0.5, price: cleanPrice,
+          basketWeightEach: cleanBasketWeightEach, price: cleanPrice,
           commissionRate: cleanCommRate, porterage: totalPorterage,
           manualFinal: cleanManualFinal,
         });
@@ -568,10 +581,11 @@ export default function Invoices() {
                     className="flex-1 rounded border border-input bg-background px-1.5 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-ring h-6 font-sans font-medium" placeholder="0" />
                   <button type="button" onClick={handlePayAll} title="إيصال كامل المبلغ"
                     className="h-6 px-1.5 text-[10px] bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded font-medium transition-colors whitespace-nowrap flex items-center gap-0.5">
-                    <Check size={11} /> الكل
+                    <Check size={11} /> واصل كاملا
                   </button>
                 </div>
               </div>
+              <br />
               <div className="flex flex-col gap-0.5">
                 <label className="text-[10px] text-muted-foreground">ملاحظات</label>
                 <input value={invForm.notes} onChange={e => setInvForm(f => ({ ...f, notes: e.target.value }))}
@@ -588,9 +602,7 @@ export default function Invoices() {
 
       {/* سجل المبيعات */}
       <div className="lg:col-span-2 flex flex-col gap-1 max-w-full overflow-x-auto no-print">
-        <div className="px-1">
-          <h2 className="text-sm font-bold">سجل المبيعات</h2>
-        </div>
+        
 
         {error && <div className="rounded-md bg-destructive/10 text-destructive px-2 py-1 text-[11px]">{error}</div>}
 

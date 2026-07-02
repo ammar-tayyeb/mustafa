@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { computeInvoiceTotals, computeInvoiceItem, fromInt, toInt } from './money.js';
 
 describe('money helpers', () => {
-  it('converts decimal values to integer cents and back', () => {
-    expect(toInt(12.34)).toBe(1234);
-    expect(fromInt(1234)).toBe(12.34);
+  it('converts decimal values to whole IQD values', () => {
+    expect(toInt(12.34)).toBe(12);
+    expect(fromInt(1234)).toBe(1234);
   });
 
   it('computes invoice totals from stored integer amounts', () => {
@@ -18,12 +18,12 @@ describe('money helpers', () => {
 
     expect(totals).toEqual({
       total_final: 5000,
-      paid_amount: 2000,
-      remaining: 3000,
+      paid_amount: 20,
+      remaining: 4980,
     });
   });
 
-  it('computes invoice item totals using integer arithmetic', () => {
+  it('computes invoice item totals using whole-unit arithmetic', () => {
     const item = computeInvoiceItem({
       grossWeight: 10,
       basketCount: 2,
@@ -34,7 +34,7 @@ describe('money helpers', () => {
       manualFinal: 30.48,
     });
 
-    expect(item.final_amount).toBe(3048);
-    expect(item.display.finalAmount).toBe(30.48);
+    expect(item.final_amount).toBe(30);
+    expect(item.display.finalAmount).toBe(30);
   });
 });

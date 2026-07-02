@@ -134,10 +134,7 @@ export default function Traders() {
     <div className="flex flex-col gap-6">
       {/* رأس الصفحة */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold">التجار</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">إدارة الحسابات العامة وفتح قوائم ديون يدوية مستقلة</p>
-        </div>
+     
         <button
           onClick={openAdd}
           className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"

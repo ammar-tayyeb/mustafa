@@ -62,7 +62,7 @@ export default function Transactions() {
     { key: "trader_name",  label: "التاجر", render: row => <span className="text-[12px] font-semibold truncate max-w-[110px] block">{row.trader_name}</span> },
     { key: "amount",      label: "المبلغ", render: row => <span className="font-sans font-semibold text-[12px] text-primary">{formatMoney(row.amount)}</span> },
     { key: "description", label: "الوصف", sortable: false, render: row => <span className="text-muted-foreground text-[12px] truncate max-w-[150px] block" title={row.description}>{row.description || "—"}</span> },
-    { key: "notes",       label: "الملاحظات", sortable: false, render: row => <span className="text-foreground/85 text-[13px] leading-5 whitespace-normal break-words block max-w-[220px]" title={row.notes}>{row.notes || "—"}</span> }
+    
   ];
 
   return (
