@@ -6,25 +6,27 @@ import {
   ScrollText,
   BarChart2,
   Settings,
-  CreditCard,  // ✅ الأيقونة الجديدة
+  CreditCard,  
 } from "lucide-react";
 
+
 const navItems = [
-  { to: "/",             label: "المبيعات",         icon: FileText },
-  { to: "/traders",      label: "البگاگيل",          icon: Users },
-  { to: "/debts",        label: "الديون",           icon: CreditCard }, // ✅ مختلفة
-  { to: "/drivers",      label: "السواق",          icon: UserCheck },
+  { to: "/",         label: "المبيعات",         icon: FileText, end: true }, // أضفنا end لمنع تداخل نشاط المسار الرئيسي
+  { to: "/traders",  label: "البگاگيل",          icon: Users },
+  { to: "/debts",    label: "الديون",           icon: CreditCard }, 
+  { to: "/drivers",  label: "السواق",          icon: UserCheck },
   { to: "/transactions", label: "سجل المعاملات",   icon: ScrollText },
-  { to: "/reports",      label: "التقارير",         icon: BarChart2 },
-  { to: "/settings",     label: "الإعدادات",        icon: Settings },
+  { to: "/reports",  label: "التقارير",         icon: BarChart2 },
+  { to: "/settings", label: "الإعدادات",        icon: Settings },
 ];
 
 export default function AppLayout() {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-      <header className="h-16  flex items-center px-6 border-b border-border bg-sidebar">
-       
+     
 
+      {/* 2. الهيدر الرئيسي للتطبيق ويحتوي على شريط التنقل */}
+      <header className="h-16 flex items-center px-6 border-b border-border bg-sidebar">
         <nav className="flex items-center gap-2 h-full py-2">
           {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
@@ -47,6 +49,7 @@ export default function AppLayout() {
         </nav>
       </header>
 
+      {/* 3. محتوى الصفحات المتغيرة */}
       <main className="flex-1 overflow-y-auto p-2">
         <Outlet />
       </main>

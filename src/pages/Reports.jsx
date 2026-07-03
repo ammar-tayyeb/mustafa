@@ -113,7 +113,7 @@ export default function Reports() {
   const totalPorterage  = calculatedMetrics.porterage;
   
   // الأرباح = إجمالي العمولة - الحمالية 
-  const totalProfits    = totalCommission - totalPorterage; 
+  const totalProfits    = totalCommission; 
 
   // ─── تعريف أعمدة جداول البيانات ──────────────────────────────────────────
   const invColumns = [
@@ -177,7 +177,7 @@ export default function Reports() {
       {/* كروت المؤشرات الخمسة المحدثة حسابياً وزمنياً */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {[
-          { label: "الأرباح (العمولة - الحمالية)", value: formatMoney(totalProfits), color: "text-emerald-700 bg-emerald-50/50 border-emerald-200/60" },
+          { label: "الأرباح ", value: formatMoney(totalProfits), color: "text-emerald-700 bg-emerald-50/50 border-emerald-200/60" },
           { label: "إجمالي العمولة",   value: formatMoney(totalCommission),  color: "text-primary bg-primary/5 border-primary/10" },
           { label: "إجمالي الحمالية",  value: formatMoney(totalPorterage), color: "text-blue-600 bg-blue-50/40 border-blue-200/50" },
           { label: "أرصدة ديون التجار الكلية", value: formatMoney(totalDebt),  color: "text-destructive bg-destructive/5 border-destructive/10" },

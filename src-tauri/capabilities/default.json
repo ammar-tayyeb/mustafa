@@ -12,7 +12,6 @@
     "dialog:default",
     "dialog:allow-save",
     "fs:default",
-    "fs:allow-copy-file",
     "fs:allow-read-file",
     "fs:allow-write-file",
     {
