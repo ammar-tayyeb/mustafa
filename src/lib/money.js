@@ -19,6 +19,11 @@ export function formatMoney(intVal, currency = "د.ع") {
   return n.toLocaleString("en-US") + (currency ? " " + currency : "");
 }
 
+function roundDownToStep(value, step) {
+  if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return 0;
+  return Math.floor(value / step) * step;
+}
+
 /** تنسيق وزن للعرض */
 export function formatWeight(intVal) {
   const n = fromInt(intVal);
@@ -33,6 +38,7 @@ export function formatWeight(intVal) {
  *   basketCount      — عدد السلات
  *   basketWeightEach — وزن السلة الواحدة (كجم، افتراضي 0.5)
  *   price            — السعر لكل كجم
+ *   basketPrice      — سعر السلة الواحدة
  *   commissionRate   — نسبة العمولة % (مثلاً 5)
  *   porterage        — الحمالية (مبلغ رقمي)
  *   manualFinal      — مبلغ نهائي يدوي (اختياري، يتجاوز الحساب)
@@ -42,23 +48,27 @@ export function formatWeight(intVal) {
  */
 export function computeInvoiceItem({
   grossWeight = 0, basketCount = 0, basketWeightEach = 0.5,
-  price = 0, commissionRate = 0, porterage = 0, manualFinal = null,
+  price = 0, basketPrice = 0, commissionRate = 0, porterage = 0, manualFinal = null,
 }) {
   const grossW = Number(grossWeight) || 0;
   const bCount = Number(basketCount) || 0;
   const bWeight = Number(basketWeightEach) || 0;
   const priceI = Number(price) || 0;
+  const basketPriceI = Number(basketPrice) || 0;
   const commRate = Number(commissionRate) || 0;
   const porterageI = toInt(porterage);
 
   const netWeight = grossW - (bCount * bWeight);
   const amountBefore = Math.round(netWeight * priceI);
-  const commissionValue = Math.round(amountBefore * (commRate / 100));
+  const rawCommissionValue = Math.round(amountBefore * (commRate / 100));
+  const commissionValue = roundDownToStep(rawCommissionValue, 250);
   const amountAfterComm = amountBefore + commissionValue;
-  const autoFinal = amountAfterComm + porterageI;
+  const basketPriceTotal = Math.round(bCount * basketPriceI);
+  const autoFinal = amountAfterComm + porterageI + basketPriceTotal;
+  const roundedFinal = roundDownToStep(autoFinal, 250);
   const finalAmount = (manualFinal !== null && manualFinal !== "")
     ? toInt(manualFinal)
-    : autoFinal;
+    : roundedFinal;
 
   return {
     // ─── الحقول الخام (يحتاجها db.js للإدراج) ───
@@ -66,6 +76,7 @@ export function computeInvoiceItem({
     basket_count: bCount,
     basket_weight_each: bWeight,
     price: priceI,
+    basket_price: basketPriceI,
     commission_rate: commRate,
     porterage: porterageI,
 
@@ -74,6 +85,7 @@ export function computeInvoiceItem({
     amount_before: amountBefore,
     commission_value: commissionValue,
     amount_after_comm: amountAfterComm,
+    basket_price_total: basketPriceTotal,
     final_amount: finalAmount,
 
     // ─── نسخة للعرض في الواجهة فقط ───
@@ -82,6 +94,7 @@ export function computeInvoiceItem({
       amountBefore,
       commissionValue,
       amountAfterComm,
+      basketPriceTotal,
       finalAmount,
     },
   };

@@ -59,7 +59,7 @@ export default function Transactions() {
   const columns = [
     { key: "date",        label: "التاريخ", render: row => renderTableDateTime(row.date) },
     { key: "type",        label: "النوع", render: row => <span className="text-[12px] font-medium">{TYPE_LABELS[row.type] ?? row.type}</span> },
-    { key: "trader_name",  label: "التاجر", render: row => <span className="text-[12px] font-semibold truncate max-w-[110px] block">{row.trader_name}</span> },
+    { key: "trader_name",  label: "البگال", render: row => <span className="text-[12px] font-semibold truncate max-w-[110px] block">{row.trader_name}</span> },
     { key: "amount",      label: "المبلغ", render: row => <span className="font-sans font-semibold text-[12px] text-primary">{formatMoney(row.amount)}</span> },
     { key: "description", label: "الوصف", sortable: false, render: row => <span className="text-muted-foreground text-[12px] truncate max-w-[150px] block" title={row.description}>{row.description || "—"}</span> },
     

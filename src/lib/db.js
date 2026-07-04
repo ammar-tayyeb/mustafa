@@ -168,6 +168,7 @@ async function ensureDesktopSchema(db) {
   await addColumnIfMissing(db, "invoice_items", "basket_weight_each", "INTEGER NOT NULL DEFAULT 50");
   await addColumnIfMissing(db, "invoice_items", "net_weight", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "invoice_items", "price", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "invoice_items", "basket_price", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "invoice_items", "amount_before", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "invoice_items", "commission_rate", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "invoice_items", "commission_value", "INTEGER NOT NULL DEFAULT 0");
@@ -546,6 +547,7 @@ export async function upsertInvoiceItem(item) {
         basket_weight_each: item.basket_weight_each ?? 50,
         net_weight: item.net_weight,
         price: item.price,
+        basket_price: item.basket_price ?? 0,
         amount_before: item.amount_before,
         commission_rate: item.commission_rate,
         commission_value: item.commission_value,
@@ -564,6 +566,7 @@ export async function upsertInvoiceItem(item) {
         basket_weight_each: item.basket_weight_each ?? 50,
         net_weight: item.net_weight,
         price: item.price,
+        basket_price: item.basket_price ?? 0,
         amount_before: item.amount_before,
         commission_rate: item.commission_rate,
         commission_value: item.commission_value,
@@ -583,9 +586,9 @@ export async function upsertInvoiceItem(item) {
   await db.execute(
     `INSERT INTO invoice_items
       (id, invoice_id, product_name, gross_weight, basket_count, basket_weight_each,
-       net_weight, price, amount_before, commission_rate, commission_value,
+       net_weight, price, basket_price, amount_before, commission_rate, commission_value,
        amount_after_comm, porterage, final_amount, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        product_name=excluded.product_name,
        gross_weight=excluded.gross_weight,
@@ -593,6 +596,7 @@ export async function upsertInvoiceItem(item) {
        basket_weight_each=excluded.basket_weight_each,
        net_weight=excluded.net_weight,
        price=excluded.price,
+       basket_price=excluded.basket_price,
        amount_before=excluded.amount_before,
        commission_rate=excluded.commission_rate,
        commission_value=excluded.commission_value,
@@ -603,7 +607,7 @@ export async function upsertInvoiceItem(item) {
     [
       id, item.invoice_id, item.product_name,
       item.gross_weight, item.basket_count, item.basket_weight_each ?? 50,
-      item.net_weight, item.price,
+      item.net_weight, item.price, item.basket_price ?? 0,
       item.amount_before, item.commission_rate, item.commission_value,
       item.amount_after_comm, item.porterage, item.final_amount,
       ts, ts,
@@ -685,7 +689,7 @@ export async function createPayment({ trader_id, amount, date, notes = null }) {
   return id;
 }
 
-// جلب الفواتير أو الديون غير المسددة لتاجر معين
+// جلب الفواتير أو الديون غير المسددة لبگال معين
 export async function getTraderUnpaidInvoices(traderId) {
   if (!isTauriRuntime()) {
     const invoices = getFallbackRecords("invoices")
@@ -822,6 +826,7 @@ export async function createManualDebtInvoice({ trader_id, amount, date, notes }
 }
 
 // ─── Transactions Log ────────────────────────────────────────────────────────
+// ─── تكملة دالة جلب سجل المعاملات (Transactions Log) ────────────────────────
 export async function getTransactions({ from = null, to = null, trader_id = null } = {}) {
   if (!isTauriRuntime()) {
     const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
@@ -830,30 +835,53 @@ export async function getTransactions({ from = null, to = null, trader_id = null
       .filter(item => !from || item.date >= from)
       .filter(item => !to || item.date <= to)
       .filter(item => !trader_id || item.trader_id === trader_id)
-      // تأكيد دمج الحقل وتوفيره هنا كـ Fallback لحماية الكود من الـ undefined
-      .map(item => ({ 
-        ...item, 
+      .map(item => ({
+        ...item,
         trader_name: traders.get(item.trader_id)?.name ?? null,
-        notes: item.notes ?? "" 
       }))
-      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-      .slice(0, 1000);
+      .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.created_at || "").localeCompare(a.created_at || ""));
   }
 
   const db = await getDb();
-  let where = "tl.is_deleted=0";
+  let where = "l.is_deleted=0";
   const params = [];
-  if (from)      { where += " AND tl.date >= ?"; params.push(from); }
-  if (to)        { where += " AND tl.date <= ?"; params.push(to); }
-  if (trader_id) { where += " AND tl.trader_id=?"; params.push(trader_id); }
+  if (from)      { where += " AND l.date >= ?"; params.push(from); }
+  if (to)        { where += " AND l.date <= ?"; params.push(to); }
+  if (trader_id) { where += " AND l.trader_id = ?"; params.push(trader_id); }
 
-  // قمنا بالإبقاء على tl.* ولكن يفضل دائماً التأكد من أن جدول قاعدة البيانات المحلي (SQLite) يحتوي على حقل notes
   return db.select(`
-    SELECT tl.*, t.name as trader_name
-    FROM transactions_log tl
-    LEFT JOIN traders t ON tl.trader_id = t.id
-    WHERE ${where} ORDER BY tl.created_at DESC LIMIT 1000
+    SELECT l.*, t.name as trader_name
+    FROM transactions_log l
+    LEFT JOIN traders t ON l.trader_id = t.id
+    WHERE ${where} ORDER BY l.date DESC, l.created_at DESC
   `, params);
+}
+
+// ─── الدوال الجديدة الخاصة بكشف حساب السواق اليومي ───────────────────────────
+
+/**
+ * جلب جميع الفواتير المُرحّلة والخاصة بسائق معين
+ */
+export async function getInvoicesByDriver(driverId) {
+  if (!isTauriRuntime()) {
+    const traders = new Map(getFallbackRecords("traders").filter(item => item.is_deleted !== 1).map(item => [item.id, item]));
+    return getFallbackRecords("invoices")
+      .filter(inv => inv.driver_id === driverId && inv.is_deleted !== 1 && inv.status === "posted")
+      .map(inv => ({
+        ...inv,
+        trader_name: traders.get(inv.trader_id)?.name ?? "بگال غير معروف"
+      }))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }
+
+  const db = await getDb();
+  return db.select(`
+    SELECT i.*, t.name as trader_name 
+    FROM invoices i
+    LEFT JOIN traders t ON i.trader_id = t.id
+    WHERE i.driver_id = ? AND i.is_deleted = 0 AND i.status = 'posted'
+    ORDER BY i.date DESC
+  `, [driverId]);
 }
 // ─── Settings ────────────────────────────────────────────────────────────────
 export async function getSetting(key) {

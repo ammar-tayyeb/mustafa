@@ -29,12 +29,44 @@ describe('money helpers', () => {
       basketCount: 2,
       basketWeightEach: 0.5,
       price: 3.5,
+      basketPrice: 125,
       commissionRate: 5,
       porterage: 1,
       manualFinal: 30.48,
     });
 
+    expect(item.basket_price_total).toBe(250);
     expect(item.final_amount).toBe(30);
     expect(item.display.finalAmount).toBe(30);
+  });
+
+  it('rounds automatic final amounts down to the nearest 250', () => {
+    const item = computeInvoiceItem({
+      grossWeight: 100,
+      basketCount: 0,
+      basketWeightEach: 0.5,
+      price: 1254,
+      basketPrice: 0,
+      commissionRate: 0,
+      porterage: 0,
+    });
+
+    expect(item.final_amount).toBe(125250);
+    expect(item.display.finalAmount).toBe(125250);
+  });
+
+  it('rounds commission amounts down to the nearest 250 as well', () => {
+    const item = computeInvoiceItem({
+      grossWeight: 100,
+      basketCount: 0,
+      basketWeightEach: 0.5,
+      price: 1000,
+      basketPrice: 0,
+      commissionRate: 1,
+      porterage: 0,
+    });
+
+    expect(item.commission_value).toBe(1000);
+    expect(item.display.commissionValue).toBe(1000);
   });
 });

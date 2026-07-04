@@ -14,7 +14,7 @@ export default function Traders() {
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
 
-  // نموذج إضافة/تعديل تاجر
+  // نموذج إضافة/تعديل بگال
   const [showForm, setShowForm]     = useState(false);
   const [editRow, setEditRow]       = useState(null);
   const [form, setForm]             = useState(EMPTY_FORM);
@@ -139,9 +139,10 @@ export default function Traders() {
           onClick={openAdd}
           className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"
         >
-          <Plus size={16} /> إضافة تاجر
+          <Plus size={16} /> إضافة بگال
         </button>
       </div>
+    
 
       {error && <div className="rounded-md bg-destructive/10 text-destructive px-4 py-3 text-sm">{error}</div>}
 
@@ -152,7 +153,7 @@ export default function Traders() {
           columns={columns}
           data={traders}
           searchKeys={["name", "phone"]}
-          emptyText="لا يوجد تجار مسجّلون"
+          emptyText="لا يوجد بگاگيل مسجّلون"
           actions={row => (
             <div className="flex items-center gap-1">
               <button
@@ -164,7 +165,7 @@ export default function Traders() {
               </button>
               <button
                 onClick={() => openEdit(row)}
-                title="تعديل بيانات التاجر"
+                title="تعديل بيانات البگال"
                 className="p-1.5 rounded hover:bg-accent"
               >
                 <Pencil size={15} />
@@ -181,12 +182,12 @@ export default function Traders() {
         />
       )}
 
-      {/* نموذج إضافة/تعديل تاجر */}
+      {/* نموذج إضافة/تعديل بگال */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-background rounded-lg shadow-xl border border-border w-full max-w-md mx-4">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h3 className="font-semibold">{editRow ? "تعديل بيانات التاجر" : "إضافة تاجر جديد"}</h3>
+              <h3 className="font-semibold">{editRow ? "تعديل بيانات البگال" : "إضافة بگال جديد"}</h3>
               <button onClick={() => setShowForm(false)} className="p-1 rounded hover:bg-accent">
                 <X size={16} />
               </button>
@@ -199,7 +200,7 @@ export default function Traders() {
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="اسم التاجر الثلاثي"
+                  placeholder="اسم البگال الثلاثي"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -307,8 +308,8 @@ export default function Traders() {
       {/* تأكيد الحذف */}
       <ConfirmDialog
         open={!!deleteRow}
-        title="حذف تاجر"
-        message={`هل تريد حذف التاجر «${deleteRow?.name}»؟ لن يُحذف نهائياً من أرشيف النظام.`}
+        title="حذف بگال"
+        message={`هل تريد حذف البگال «${deleteRow?.name}»؟ لن يُحذف نهائياً من أرشيف النظام.`}
         confirmText="تأكيد الحذف"
         danger
         onConfirm={handleDelete}

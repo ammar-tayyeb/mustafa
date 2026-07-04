@@ -1,5 +1,5 @@
 /**
- * findOrCreate.js — إيجاد أو إنشاء تاجر/سائق/مركبة مباشرة من حقول الفاتورة
+ * findOrCreate.js — إيجاد أو إنشاء بگال/سائق/مركبة مباشرة من حقول الفاتورة
  */
 import { getDb, uuid, now, isTauriRuntime } from "./db.js";
 
@@ -29,7 +29,7 @@ function findFallbackRecord(table, matcher) {
   return rows.find(matcher) ?? null;
 }
 
-/** إيجاد أو إنشاء تاجر بالاسم */
+/** إيجاد أو إنشاء بگال بالاسم */
 export async function findOrCreateTrader(name) {
   if (!name?.trim()) return null;
   const normalized = name.trim();

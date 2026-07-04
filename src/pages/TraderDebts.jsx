@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { CreditCard, Calendar, ShoppingBag, ArrowLeftRight, Printer, Search } from "lucide-react";
-import { getTraders, getTraderUnpaidInvoices, paySpecificInvoice, getAllSettings } from "../lib/db.js";
+import { getTraders, getTraderUnpaidInvoices, getInvoiceItems, paySpecificInvoice, getAllSettings } from "../lib/db.js";
 import { formatMoney, toInt } from "../lib/money.js";
 
 export default function TradersDebts() {
@@ -23,7 +23,7 @@ export default function TradersDebts() {
     });
   }, []);
 
-  // تحميل التجار المسجلين لديهم ديون
+  // تحميل البگاگيل المسجلين لديهم ديون
   const loadTraders = useCallback(async () => {
     const res = await getTraders();
     setTraders(res.filter(t => t.debt_fils > 0));
@@ -31,7 +31,7 @@ export default function TradersDebts() {
 
   useEffect(() => { loadTraders(); }, [loadTraders]);
 
-  // تصفية التجار حركياً بناءً على نص البحث
+  // تصفية البگاگيل حركياً بناءً على نص البحث
   const filteredTraders = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return traders;
@@ -47,7 +47,13 @@ export default function TradersDebts() {
     setActiveInvoiceToPay(null);
     try {
       const invoices = await getTraderUnpaidInvoices(trader.id);
-      setUnpaidInvoices(invoices);
+      const invoicesWithItems = await Promise.all(
+        invoices.map(async invoice => ({
+          ...invoice,
+          items: await getInvoiceItems(invoice.id),
+        }))
+      );
+      setUnpaidInvoices(invoicesWithItems);
     } catch (e) {
       alert("خطأ أثناء جلب القوائم: " + e.message);
     } finally {
@@ -242,6 +248,52 @@ export default function TradersDebts() {
     return `${timeString} | ${dateString}`;
   }, [unpaidInvoices, selectedTrader]);
 
+  const formatWeightValue = (value) => {
+    const numericValue = Number(value || 0);
+    return `${numericValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`;
+  };
+
+  const buildInvoiceRows = (invoice) => {
+    const minimumRows = 4;
+
+    if (invoice.items?.length) {
+      const realRows = invoice.items.map((item, index) => ({
+        number: String(index + 1).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]),
+        amount: formatMoney(item.final_amount ?? 0),
+        weight: formatWeightValue(item.net_weight),
+        price: formatMoney(item.price ?? 0),
+        count: Number(item.basket_count ?? 0).toLocaleString("en-US"),
+        type: item.product_name || "—",
+        details: item.product_name || invoice.product_summary || "—",
+      }));
+
+      const fillerRows = Array.from({ length: Math.max(0, minimumRows - realRows.length) }, (_, index) => {
+        const rowNumber = realRows.length + index + 1;
+        return {
+          number: String(rowNumber).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]),
+          amount: "—",
+          weight: "—",
+          price: "—",
+          count: "—",
+          type: "—",
+          details: "—",
+        };
+      });
+
+      return [...realRows, ...fillerRows];
+    }
+
+    return Array.from({ length: minimumRows }, (_, index) => ({
+      number: String(index + 1).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]),
+      amount: index === 0 ? formatMoney(invoice.remaining ?? 0) : "—",
+      weight: "—",
+      price: "—",
+      count: "—",
+      type: index === 0 ? (invoice.product_summary || "قيد دين يدوي") : "—",
+      details: index === 0 ? (invoice.notes || invoice.product_summary || "قيد دين يدوي") : "—",
+    }));
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-[calc(100vh-140px)]">
       
@@ -331,18 +383,18 @@ export default function TradersDebts() {
         }
       `}</style>
 
-      {/* القسم الأيمن: قائمة التجار */}
+      {/* القسم الأيمن: قائمة البگاگيل */}
       <div className="md:col-span-4 border border-border rounded-xl bg-card p-4 flex flex-col gap-4 overflow-y-auto no-print">
         <div>
-          <h3 className="font-bold text-lg">أرصدة ديون التجار</h3>
-          <p className="text-xs text-muted-foreground">اختر تاجر لعرض تفاصيل قوائمه</p>
+          <h3 className="font-bold text-lg">أرصدة ديون البگاگيل</h3>
+          <p className="text-xs text-muted-foreground">اختر بگال لعرض تفاصيل قوائمه</p>
         </div>
 
         <div className="relative">
           <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="ابحث باسم التاجر أو رقم الهاتف..."
+            placeholder="ابحث باسم البگال أو رقم الهاتف..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-lg border border-input bg-background pr-9 pl-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
@@ -384,7 +436,7 @@ export default function TradersDebts() {
                 onClick={printAllTraderInvoices}
                 className="flex items-center gap-1.5 text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 px-3 py-2 rounded-lg transition-colors"
               >
-                <Printer size={14} /> طباعة كافة القوائم للتاجر ({unpaidInvoices.length})
+                <Printer size={14} /> طباعة كافة القوائم للبگال ({unpaidInvoices.length})
               </button>
             </div>
 
@@ -444,24 +496,15 @@ export default function TradersDebts() {
                           </tr>
                         </thead>
                         <tbody>
-                          <tr>
-                            <td>١</td>
-                            <td className="font-bold">{formatMoney(inv.remaining)}</td>
-                            <td>—</td>
-                            <td>—</td>
-                            <td>—</td>
-                            <td>—</td>
-                            <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: '500' }}>{inv.product_summary || "رصيد متبقي بذمة العميل"}</td>
-                          </tr>
-                          {[2, 3, 4].map(num => (
-                            <tr key={num}>
-                              <td>{num === 2 ? "٢" : num === 3 ? "٣" : "٤"}</td>
-                              <td></td>
-                              <td></td>
-                              <td></td>
-                              <td></td>
-                              <td></td>
-                              <td></td>
+                          {buildInvoiceRows(inv).map((row, index) => (
+                            <tr key={`${inv.id}-row-${index}`}>
+                              <td>{row.number}</td>
+                              <td className="font-bold">{row.amount}</td>
+                              <td>{row.weight}</td>
+                              <td>{row.price}</td>
+                              <td>{row.count}</td>
+                              <td>{row.type}</td>
+                              <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: '500' }}>{row.details}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -479,7 +522,7 @@ export default function TradersDebts() {
                 ))}
 
                 {unpaidInvoices.length === 0 && (
-                  <p className="text-center text-sm text-muted-foreground py-12 no-print">جميع القوائم مسددة بالكامل لهذا التاجر!</p>
+                  <p className="text-center text-sm text-muted-foreground py-12 no-print">جميع القوائم مسددة بالكامل لهذا البگال!</p>
                 )}
               </div>
             )}
@@ -487,12 +530,12 @@ export default function TradersDebts() {
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2 py-20 no-print">
             <ArrowLeftRight size={32} className="stroke-[1.5]" />
-            <p className="text-sm">قم باختيار تاجر من القائمة اليمنى لعرض السجلات.</p>
+            <p className="text-sm">قم باختيار بگال من القائمة اليمنى لعرض السجلات.</p>
           </div>
         )}
       </div>
 
-      {/* منطقة مخفية تماماً مخصصة لتجميع وطباعة كافة الوصولات دفعة واحدة للتاجر المختار */}
+      {/* منطقة مخفية تماماً مخصصة لتجميع وطباعة كافة الوصولات دفعة واحدة للبگال المختار */}
       <div id="all-trader-invoices-print-zone" className="hidden">
         {unpaidInvoices.map(inv => (
           <div key={`bulk-${inv.id}`} className="print-page-wrapper">
@@ -533,24 +576,15 @@ export default function TradersDebts() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td>١</td>
-                    <td className="font-bold">{formatMoney(inv.remaining)}</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: '500' }}>{inv.product_summary || "رصيد متبقي بذمة العميل"}</td>
-                  </tr>
-                  {[2, 3, 4].map(num => (
-                    <tr key={num}>
-                      <td>{num === 2 ? "٢" : num === 3 ? "٣" : "٤"}</td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
+                  {buildInvoiceRows(inv).map((row, index) => (
+                    <tr key={`bulk-${inv.id}-row-${index}`}>
+                      <td>{row.number}</td>
+                      <td className="font-bold">{row.amount}</td>
+                      <td>{row.weight}</td>
+                      <td>{row.price}</td>
+                      <td>{row.count}</td>
+                      <td>{row.type}</td>
+                      <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: '500' }}>{row.details}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -573,7 +607,7 @@ export default function TradersDebts() {
           <div className="bg-background rounded-lg shadow-xl border border-border w-full max-w-sm mx-4 p-5 flex flex-col gap-4">
             <div>
               <h4 className="font-bold text-base text-green-600">تسديد دفعة لقائمة محددة</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">التاجر: {selectedTrader?.name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">البگال: {selectedTrader?.name}</p>
             </div>
             
             <div className="bg-muted/50 p-2.5 rounded text-xs flex justify-between">
@@ -605,7 +639,7 @@ export default function TradersDebts() {
                   className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
-
+ 
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium">ملاحظة القيد</label>
                 <input

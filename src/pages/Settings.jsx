@@ -13,6 +13,8 @@ export default function Settings() {
   const [currency,     setCurrency]     = useState("");
   const [commission,   setCommission]   = useState("");
   const [basketWeight, setBasketWeight] = useState("");
+  const [basketPrice,  setBasketPrice]  = useState("");
+  const [porterage,    setPorterage]    = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -27,9 +29,13 @@ export default function Settings() {
       const rawComm = Number(s.default_commission ?? 500);
       setCommission((rawComm / 100).toString());
       
-      // قراءة وزن السلة الافتراضي مباشرة كقيمة عددية
-      const rawWeight = Number(s.basket_weight ?? 50);
-      setBasketWeight(rawWeight.toString());
+      // قراءة وزن السلة كقيمة عشرية مع دعم القيم القديمة المخزنة بصيغة 50 = 0.5
+      const rawWeight = Number(s.basket_weight ?? 0.5);
+      const displayWeight = rawWeight > 10 ? rawWeight / 100 : rawWeight;
+      setBasketWeight(displayWeight.toString());
+
+      setBasketPrice(Number(s.basket_price ?? 250).toString());
+      setPorterage(Number(s.porterage ?? 250).toString());
     } catch (e) { 
       setError(e.message); 
     } finally { 
@@ -46,18 +52,21 @@ export default function Settings() {
     setError(null);
     
     try {
-      // تحويل النسبة المدخلة (مثلاً 5) إلى القيمة المخزنة الصحيحة (5 * 100 = 500)
       const parsedCommission = Math.round(parseFloat(commission) * 100);
-      const parsedBasketWeight = Math.round(parseFloat(basketWeight));
+      const parsedBasketWeight = parseFloat(basketWeight);
+      const parsedBasketPrice = Math.round(parseFloat(basketPrice));
+      const parsedPorterage = Math.round(parseFloat(porterage));
 
-      if (isNaN(parsedCommission) || isNaN(parsedBasketWeight)) {
-        throw new Error("الرجاء إدخال قيم عددية صحيحة للعمولة والوزن.");
+      if (isNaN(parsedCommission) || isNaN(parsedBasketWeight) || isNaN(parsedBasketPrice) || isNaN(parsedPorterage)) {
+        throw new Error("الرجاء إدخال قيم عددية صحيحة للعمولة والوزن والسعر والحمالية.");
       }
 
       await setSetting("market_name", marketName.trim());
       await setSetting("currency", currency.trim());
       await setSetting("default_commission", parsedCommission);
       await setSetting("basket_weight", parsedBasketWeight);
+      await setSetting("basket_price", parsedBasketPrice);
+      await setSetting("porterage", parsedPorterage);
       
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -68,7 +77,7 @@ export default function Settings() {
     }
   }
 
-async function handleBackup() {
+  async function handleBackup() {
     if (!isTauriRuntime()) {
       alert("النسخ الاحتياطي متاح فقط داخل تطبيق سطح المكتب.");
       return;
@@ -85,12 +94,9 @@ async function handleBackup() {
 
       const { save } = dialogPlugin;
       const { copyFile } = fsPlugin;
-      const { appDataDir, join } = pathApi; // 👈 جلب دالة join لربط المسارات بشكل آمن
+      const { appDataDir, join } = pathApi;
 
-      // جلب مجلد بيانات التطبيق الصحيح
       const dataDir = await appDataDir();
-      
-      // 👈 استخدام join يضمن وضع الـ Backslash (\) الصحيحة بين المجلد والملف
       const srcPath = await join(dataDir, "warehouse.db");
       
       const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -109,7 +115,6 @@ async function handleBackup() {
     }
   }
 
-  // تنسيقات حقول الإدخال المحسنة بلمسة جمالية ناعمة
   const inp = "rounded-lg border border-border bg-background px-3.5 py-2 text-sm outline-none transition-all duration-200 focus:border-primary focus:ring-2 focus:ring-primary/10 w-full hover:border-muted-foreground/30";
 
   return (
@@ -135,11 +140,10 @@ async function handleBackup() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-muted-foreground text-sm animate-pulse">
-          جارٍ تحميل الإعدادات وتأمين الاتصال...
+          Reliable loading... جارٍ تحميل الإعدادات وتأمين الاتصال...
         </div>
       ) : (
         <form onSubmit={handleSave} className="flex flex-col gap-6">
-          {/* كارت معلومات السوق */}
           <div className="rounded-xl border border-border/80 bg-card p-5 shadow-sm flex flex-col gap-4 hover:shadow-md transition-shadow duration-200">
             <h3 className="font-bold text-sm text-primary border-b border-border/40 pb-2">معلومات السوق والعلوة</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -147,23 +151,42 @@ async function handleBackup() {
                 <label className="text-xs font-semibold text-muted-foreground">اسم السوق / العلوة</label>
                 <input value={marketName} onChange={e => setMarketName(e.target.value)} className={inp} placeholder="نظام إدارة العلوة" required />
               </div>
+
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">نسبة العمولة الافتراضية (%)</label>
                 <div className="relative flex items-center">
+                  {/* تم نقل محاذاة النص لليسار والمؤشر لليمين ليناسب الرموز الجانبية المضافة بشكل مريح */}
                   <input type="number" min="0" max="100" step="0.1" value={commission}
-                    onChange={e => setCommission(e.target.value)} className={inp} placeholder="5" required />
-                  <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none">%</span>
+                    onChange={e => setCommission(e.target.value)} className={`${inp} pl-8`} placeholder="5" required />
+                  <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none select-none">%</span>
                 </div>
                 <p className="text-[11px] text-muted-foreground leading-normal mt-0.5">تُطبق تلقائياً كنسبة مئوية عند إنشاء قوائم وبنود جديدة.</p>
               </div>
-             
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-muted-foreground">وزن السلة الافتراضي ($kg$)</label>
+                <div className="relative flex items-center">
+                  {/* ⚖️ تم إضافة رمز الوحدة "كغم" بشكل ثابت بداخل الحقل من الجهة اليسرى */}
+                  <input type="number" min="0" step="0.01" value={basketWeight}
+                    onChange={e => setBasketWeight(e.target.value)} className={`${inp} pl-12`} placeholder="0.5" required />
+                  <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none select-none">كغم (kg)</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-muted-foreground">سعر السلة الافتراضي</label>
+                <input type="number" min="0" step="1" value={basketPrice}
+                  onChange={e => setBasketPrice(e.target.value)} className={inp} placeholder="250" required />
+              </div>
+
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
+                <label className="text-xs font-semibold text-muted-foreground">الحمالية الافتراضية</label>
+                <input type="number" min="0" step="1" value={porterage}
+                  onChange={e => setPorterage(e.target.value)} className={inp} placeholder="250" required />
+              </div>
             </div>
           </div>
 
-          {/* كارت إعدادات حساب الفاتورة */}
-          
-
-          {/* زر الحفظ الأساسي بجاذبية بصرية ممتازة */}
           <button type="submit" disabled={saving}
             className="flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-primary/90 text-primary-foreground px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm hover:opacity-95 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 disabled:pointer-events-none">
             <Save size={16} className={saving ? "animate-spin" : ""} />
@@ -172,7 +195,6 @@ async function handleBackup() {
         </form>
       )}
 
-      {/* قسم النسخ الاحتياطي المفصول بصرياً */}
       <div className="rounded-xl border border-dashed border-border bg-muted/30 p-5 mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h3 className="font-bold text-sm flex items-center gap-1.5 text-foreground/90">
@@ -180,7 +202,7 @@ async function handleBackup() {
             تأمين البيانات والنسخ الاحتياطي
           </h3>
           <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
-            ينصح بتصدير نسخة احتياطية بشكل دوري وحفظها في مكان آمن لضمان عدم فقدان السجلات المالية للتاجر والمركبات.
+            ينصح بتصدير نسخة احتياطية بشكل دوري وحفظها في مكان آمن لضمان عدم فقدان السجلات المالية للبگال والمركبات.
           </p>
         </div>
         <button type="button" onClick={handleBackup}

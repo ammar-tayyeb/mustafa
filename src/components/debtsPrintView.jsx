@@ -35,10 +35,10 @@ export default function DebtsPrintView({
 
         <div className="p-8 flex flex-col gap-6">
           
-          {/* ─── بيانات التاجر الرئيسية ─── */}
+          {/* ─── بيانات البگال الرئيسية ─── */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-b pb-4">
             <div className="border-l-4 border-blue-500 pl-3">
-              <p className="text-xs text-gray-600 font-semibold">اسم التاجر</p>
+              <p className="text-xs text-gray-600 font-semibold">اسم البگال</p>
               <p className="text-lg font-bold text-gray-900">{trader.name}</p>
             </div>
             <div className="border-l-4 border-blue-500 pl-3">
@@ -120,7 +120,7 @@ export default function DebtsPrintView({
           {/* ─── ملاحظات إضافية ─── */}
           {trader.notes && (
             <div className="bg-gray-50 border-l-4 border-gray-400 p-4 rounded">
-              <p className="text-xs text-gray-600 font-semibold mb-1">ملاحظات التاجر</p>
+              <p className="text-xs text-gray-600 font-semibold mb-1">ملاحظات البگال</p>
               <p className="text-gray-800">{trader.notes}</p>
             </div>
           )}
@@ -133,7 +133,7 @@ export default function DebtsPrintView({
                 <p className="text-sm font-semibold">_________________</p>
               </div>
               <div>
-                <p className="text-xs text-gray-600 mb-12">توقيع التاجر</p>
+                <p className="text-xs text-gray-600 mb-12">توقيع البگال</p>
                 <p className="text-sm font-semibold">_________________</p>
               </div>
               <div>
