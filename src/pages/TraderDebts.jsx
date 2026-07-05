@@ -103,6 +103,9 @@ export default function TradersDebts() {
   };
 
   // الستايل المشترك الثابت الموجه للطباعة الصارمة والـ Iframe
+  // ملاحظة مهمة: هذا الـ iframe لا يحمّل Tailwind إطلاقاً،
+  // لذلك أي تنسيق نحتاجه بالطباعة يجب أن يكون هنا كـ CSS صريح
+  // أو مكتوب كـ inline style داخل الـ JSX، وليس كـ className من Tailwind.
   const getPrintStyles = () => `
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
     body {
@@ -184,6 +187,7 @@ export default function TradersDebts() {
       font-size: 13px;
       text-align: center;
       height: 38px;
+      color: #000 !important;
     }
     .footer-row {
       display: flex;
@@ -248,9 +252,10 @@ export default function TradersDebts() {
     return `${timeString} | ${dateString}`;
   }, [unpaidInvoices, selectedTrader]);
 
+  // مطابقة تنسيق الوزن تماماً لصفحة القوائم: رقم فقط بدون وحدة "كجم"
   const formatWeightValue = (value) => {
     const numericValue = Number(value || 0);
-    return `${numericValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`;
+    return numericValue.toLocaleString("en-US", { numberingSystem: "latn" });
   };
 
   const buildInvoiceRows = (invoice) => {
@@ -258,25 +263,25 @@ export default function TradersDebts() {
 
     if (invoice.items?.length) {
       const realRows = invoice.items.map((item, index) => ({
-        number: String(index + 1).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]),
+        number: index + 1,
         amount: formatMoney(item.final_amount ?? 0),
         weight: formatWeightValue(item.net_weight),
-        price: formatMoney(item.price ?? 0),
-        count: Number(item.basket_count ?? 0).toLocaleString("en-US"),
+        price: Number(item.price ?? 0).toLocaleString("en-US", { numberingSystem: "latn" }),
+        count: Number(item.basket_count ?? 0).toLocaleString("en-US", { numberingSystem: "latn" }),
         type: item.product_name || "—",
-        details: item.product_name || invoice.product_summary || "—",
+        details: "جملة",
       }));
 
       const fillerRows = Array.from({ length: Math.max(0, minimumRows - realRows.length) }, (_, index) => {
         const rowNumber = realRows.length + index + 1;
         return {
-          number: String(rowNumber).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]),
-          amount: "—",
-          weight: "—",
-          price: "—",
-          count: "—",
-          type: "—",
-          details: "—",
+          number: rowNumber,
+          amount: "",
+          weight: "",
+          price: "",
+          count: "",
+          type: "",
+          details: "",
         };
       });
 
@@ -284,13 +289,13 @@ export default function TradersDebts() {
     }
 
     return Array.from({ length: minimumRows }, (_, index) => ({
-      number: String(index + 1).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]),
-      amount: index === 0 ? formatMoney(invoice.remaining ?? 0) : "—",
-      weight: "—",
-      price: "—",
-      count: "—",
-      type: index === 0 ? (invoice.product_summary || "قيد دين يدوي") : "—",
-      details: index === 0 ? (invoice.notes || invoice.product_summary || "قيد دين يدوي") : "—",
+      number: index + 1,
+      amount: index === 0 ? formatMoney(invoice.remaining ?? 0) : "",
+      weight: "",
+      price: "",
+      count: "",
+      type: index === 0 ? (invoice.product_summary || "قيد دين يدوي") : "",
+      details: index === 0 ? (invoice.notes || invoice.product_summary || "قيد دين يدوي") : "",
     }));
   };
 
@@ -360,6 +365,7 @@ export default function TradersDebts() {
           font-size: 13px;
           text-align: center;
           height: 38px;
+          color: #000 !important;
         }
         .footer-row {
           display: flex;
@@ -454,7 +460,7 @@ export default function TradersDebts() {
                           <Printer size={13} /> طباعة الوصل
                         </button>
                         <button onClick={() => openPayModal(inv)} className="p-1.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1 text-xs">
-                          <CreditCard size={13} /> تسديد كامل
+                          <CreditCard size={13} /> تسديد القائمة
                         </button>
                       </div>
                     </div>
@@ -463,16 +469,16 @@ export default function TradersDebts() {
                       <div className="flex-row-header">
                         <div style={{ textAlign: 'right' }}>
                           <h2 className="text-xl font-black text-red-900" style={{ margin: 0 }}>{marketName}</h2>
-                          <p style={{ margin: '4px 0 0 0', fontSize: '11px', fontWeight: 'bold' }}>مُجاز لبيع الفواكه والخُضر بالجملة</p>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '11px', fontWeight: 'bold', color: '#000' }}>مُجاز لبيع الفواكه والخُضر بالجملة</p>
                           <p style={{ margin: 0, fontSize: '11px', color: '#4b5563' }}>موصل - سوق جملة نينوى - الأيمن</p>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                          <div className="border-box-office">رقم المكتب ( ٣٥ )</div>
-                          <div style={{ fontSize: '11px', fontFamily: 'monospace' }}>ID: #{inv.id.slice(0, 8)}</div>
+                          <div className="border-box-office" style={{ color: '#000' }}>رقم المكتب ( ٣٥ )</div>
+                          <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#000' }}>ID: #{inv.id.slice(0, 8)}</div>
                         </div>
                       </div>
 
-                      <div className="flex-row-info">
+                      <div className="flex-row-info" style={{ color: '#000' }}>
                         <div className="info-item">
                           <span className="font-bold">حضرة السيد :</span>
                           <span className="dotted-line">{selectedTrader.name}</span>
@@ -491,8 +497,8 @@ export default function TradersDebts() {
                             <th style={{ width: "13%" }}>الوزن</th>
                             <th style={{ width: "13%" }}>السعر</th>
                             <th style={{ width: "11%" }}>العدد</th>
-                            <th style={{ width: "11%" }}>النوع</th>
-                            <th style={{ width: "25%" }}>التفاصيل / المادة</th>
+                            <th style={{ width: "20%" }}>النوع (المادة)</th>
+                            <th style={{ width: "16%" }}> التفاصيل</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -503,18 +509,37 @@ export default function TradersDebts() {
                               <td>{row.weight}</td>
                               <td>{row.price}</td>
                               <td>{row.count}</td>
-                              <td>{row.type}</td>
-                              <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: '500' }}>{row.details}</td>
+                              <td style={{ fontWeight: '700' }}>{row.type}</td>
+                              <td>{row.details}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
 
-                      <div className="footer-row">
-                        <div className="signatures">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '8px', color: '#000', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', border: '1px solid #000', padding: '8px', backgroundColor: '#f9fafb', minWidth: '240px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>الحساب الإجمالي:</span>
+                            <span className="font-bold">{formatMoney(inv.total_final)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #000', paddingTop: '4px' }}>
+                            <span>المبلغ الواصل:</span>
+                            <span className="font-bold" style={{ color: '#065f46' }}>{formatMoney(inv.paid_amount)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #000', paddingTop: '4px' }} className="font-bold">
+                            <span>المتبقي :</span>
+                            <span className="font-black" style={{ color: '#b91c1c' }}>{formatMoney(inv.remaining)}</span>
+                          </div>
+                        </div>
+
+                        <div className="signatures" style={{ flex: 1, display: 'flex', justifyContent: 'space-around', paddingTop: '24px' }}>
                           <div>توقيع المستلم: ........................</div>
                           <div>توقيع الحسابات: ........................</div>
                         </div>
+                      </div>
+
+                      <div style={{ marginTop: '12px', fontSize: '10px', color: '#4b5563', borderTop: '1px dashed #000', paddingTop: '4px' }}>
+                        <span>ملاحظات الفاتورة: {inv.notes || "لا يوجد ملاحظات إضافية."}</span>
                       </div>
                     </div>
 
@@ -543,16 +568,16 @@ export default function TradersDebts() {
               <div className="flex-row-header">
                 <div style={{ textAlign: 'right' }}>
                   <h2 className="text-xl font-black text-red-900" style={{ margin: 0 }}>{marketName}</h2>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', fontWeight: 'bold' }}>مُجاز لبيع الفواكه والخُضر بالجملة</p>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', fontWeight: 'bold', color: '#000' }}>مُجاز لبيع الفواكه والخُضر بالجملة</p>
                   <p style={{ margin: 0, fontSize: '11px', color: '#4b5563' }}>موصل - سوق جملة نينوى - الأيمن</p>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                  <div className="border-box-office">رقم المكتب ( ٣٥ )</div>
-                  <div style={{ fontSize: '11px', fontFamily: 'monospace' }}>ID: #{inv.id.slice(0, 8)}</div>
+                  <div className="border-box-office" style={{ color: '#000' }}>رقم المكتب ( ٣٥ )</div>
+                  <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#000' }}>ID: #{inv.id.slice(0, 8)}</div>
                 </div>
               </div>
 
-              <div className="flex-row-info">
+              <div className="flex-row-info" style={{ color: '#000' }}>
                 <div className="info-item">
                   <span className="font-bold">حضرة السيد :</span>
                   <span className="dotted-line">{selectedTrader?.name}</span>
@@ -571,8 +596,8 @@ export default function TradersDebts() {
                     <th style={{ width: "13%" }}>الوزن</th>
                     <th style={{ width: "13%" }}>السعر</th>
                     <th style={{ width: "11%" }}>العدد</th>
-                    <th style={{ width: "11%" }}>النوع</th>
-                    <th style={{ width: "25%" }}>التفاصيل / المادة</th>
+                    <th style={{ width: "20%" }}>النوع (المادة)</th>
+                    <th style={{ width: "16%" }}> التفاصيل</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -583,18 +608,37 @@ export default function TradersDebts() {
                       <td>{row.weight}</td>
                       <td>{row.price}</td>
                       <td>{row.count}</td>
-                      <td>{row.type}</td>
-                      <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: '500' }}>{row.details}</td>
+                      <td style={{ fontWeight: '700' }}>{row.type}</td>
+                      <td>{row.details}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              <div className="footer-row">
-                <div className="signatures">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '8px', color: '#000', fontSize: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', border: '1px solid #000', padding: '8px', backgroundColor: '#f9fafb', minWidth: '240px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>الحساب الإجمالي:</span>
+                    <span className="font-bold">{formatMoney(inv.total_final)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #000', paddingTop: '4px' }}>
+                    <span>المبلغ الواصل:</span>
+                    <span className="font-bold" style={{ color: '#065f46' }}>{formatMoney(inv.paid_amount)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #000', paddingTop: '4px' }} className="font-bold">
+                    <span>المتبقي :</span>
+                    <span className="font-black" style={{ color: '#b91c1c' }}>{formatMoney(inv.remaining)}</span>
+                  </div>
+                </div>
+
+                <div className="signatures" style={{ flex: 1, display: 'flex', justifyContent: 'space-around', paddingTop: '24px' }}>
                   <div>توقيع المستلم: ........................</div>
                   <div>توقيع الحسابات: ........................</div>
                 </div>
+              </div>
+
+              <div style={{ marginTop: '12px', fontSize: '10px', color: '#4b5563', borderTop: '1px dashed #000', paddingTop: '4px' }}>
+                <span>ملاحظات الفاتورة: {inv.notes || "لا يوجد ملاحظات إضافية."}</span>
               </div>
             </div>
           </div>

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS drivers (
 CREATE INDEX IF NOT EXISTS idx_drivers_name ON drivers(name) WHERE is_deleted=0;
 
 -- =============================================
--- جدول الفواتير
+-- جدول القوائم
 -- =============================================
 CREATE TABLE IF NOT EXISTS invoices (
     id              TEXT PRIMARY KEY,

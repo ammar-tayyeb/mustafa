@@ -167,7 +167,7 @@ export default function Settings() {
                 <label className="text-xs font-semibold text-muted-foreground">وزن السلة الافتراضي ($kg$)</label>
                 <div className="relative flex items-center">
                   {/* ⚖️ تم إضافة رمز الوحدة "كغم" بشكل ثابت بداخل الحقل من الجهة اليسرى */}
-                  <input type="number" min="0" step="0.01" value={basketWeight}
+                  <input type="number"  step="0.1" value={basketWeight}
                     onChange={e => setBasketWeight(e.target.value)} className={`${inp} pl-12`} placeholder="0.5" required />
                   <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none select-none">كغم (kg)</span>
                 </div>

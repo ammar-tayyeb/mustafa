@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Pencil, Trash2, X, CreditCard, Scale, ShoppingBag } from "lucide-react";
-// استبدال الدالة القديمة بالدالة الجديدة القائمة على القوائم والفواتير المستقلة
+// استبدال الدالة القديمة بالدالة الجديدة القائمة على القوائم والقوائم المستقلة
 import { getTraders, createTrader, updateTrader, deleteTrader, createManualDebtInvoice } from "../lib/db.js";
 import { formatMoney, toInt } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";

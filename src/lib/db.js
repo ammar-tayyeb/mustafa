@@ -689,7 +689,7 @@ export async function createPayment({ trader_id, amount, date, notes = null }) {
   return id;
 }
 
-// جلب الفواتير أو الديون غير المسددة لبگال معين
+// جلب القوائم أو الديون غير المسددة لبگال معين
 export async function getTraderUnpaidInvoices(traderId) {
   if (!isTauriRuntime()) {
     const invoices = getFallbackRecords("invoices")
@@ -860,7 +860,7 @@ export async function getTransactions({ from = null, to = null, trader_id = null
 // ─── الدوال الجديدة الخاصة بكشف حساب السواق اليومي ───────────────────────────
 
 /**
- * جلب جميع الفواتير المُرحّلة والخاصة بسائق معين
+ * جلب جميع القوائم المُرحّلة والخاصة بسائق معين
  */
 export async function getInvoicesByDriver(driverId) {
   if (!isTauriRuntime()) {

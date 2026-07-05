@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Plus, Pencil, Trash2, X, FileText, Printer, ArrowRight } from "lucide-react";
 import { getDrivers, createDriver, updateDriver, deleteDriver, getInvoicesByDriver, getInvoiceItems, getAllSettings } from "../lib/db.js";
 import { formatMoney } from "../lib/money.js";
@@ -6,6 +6,29 @@ import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 
 const EMPTY = { name: "", phone: "", vehicle_plate: "", notes: "" };
+
+// ─── حساب مقاسات الطباعة الديناميكية بناءً على عدد الصفوف ─────────────────
+// الفكرة: مساحة الصفحة (A5 landscape) ثابتة. نحسب المساحة المتاحة لجسم
+// الجدول (بعد طرح الهيدر + معلومات السائق + صف عناوين الجدول + الفوتر)
+// ثم نقسمها على عدد الصفوف الفعلي. كل ما زاد عدد الصفوف، صغر حجم كل صف.
+// هذا يضمن عدم فيضان المحتوى لصفحة ثانية بغض النظر عن عدد المواد.
+function getDynamicPrintMetrics(rowCount) {
+  const effectiveRows = Math.max(rowCount, 4);
+
+  // مساحة تقريبية بالميلي متر متاحة لجسم الجدول داخل صفحة A5 landscape
+  // (بعد طرح الهيدر وصندوق المجموع والتوقيعات) — عدّلها إذا لاحظت
+  // فيضان بسيط بعد أول تجربة طباعة فعلية على طابعتك.
+  const TABLE_BODY_AVAILABLE_MM = 78;
+  const perRowMM = TABLE_BODY_AVAILABLE_MM / effectiveRows;
+
+  // تحويل تقريبي من مم إلى حجم خط/حشوة مناسبين، مع حدود دنيا/عليا
+  // تحافظ على وضوح القراءة حتى مع عدد صفوف كبير
+  const fontSize   = Math.max(6.5, Math.min(11, perRowMM * 1.3));
+  const cellPadY   = Math.max(1,   Math.min(6, perRowMM * 0.6));
+  const cellPadX   = Math.max(2,   Math.min(6, perRowMM * 0.5));
+
+  return { fontSize, cellPadY, cellPadX };
+}
 
 export default function Drivers() {
   const [rows, setRows]           = useState([]);
@@ -16,6 +39,7 @@ export default function Drivers() {
   const [form, setForm]           = useState(EMPTY);
   const [saving, setSaving]       = useState(false);
   const [deleteRow, setDeleteRow] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   // إدارة مبيعات السائق
   const [selectedDriver, setSelectedDriver] = useState(null);
@@ -55,18 +79,16 @@ export default function Drivers() {
             date: dateKey,
             salesTotal: 0,
             paidTotal: 0,
-            items: [], // ستحتوي على العناصر المدمجة
+            items: [],
             notesSummary: []
           };
         }
 
-        // تجميع وتحديث الدفعات والملاحظات
         groups[dateKey].paidTotal += Number(inv.paid_amount || 0);
         if (inv.notes && !groups[dateKey].notesSummary.includes(inv.notes)) {
           groups[dateKey].notesSummary.push(inv.notes);
         }
 
-        // دمج العناصر بناءً على المادة والسعر
         for (const item of items) {
           const productName = item.product_name;
           const price = Number(item.price || 0);
@@ -74,28 +96,18 @@ export default function Drivers() {
           const count = Number(item.basket_count || 0);
           const itemTotal = weight * price;
 
-          // تحديث المجموع الكلي للمبيعات لليوم مباشرة
           groups[dateKey].salesTotal += itemTotal;
 
-          // البحث عن عنصر مطابق (نفس السلعة ونفس السعر) في هذا اليوم
           const existingItem = groups[dateKey].items.find(
             it => it.product_name === productName && it.price === price
           );
 
           if (existingItem) {
-            // إذا وُجد، ادمج القيم الرياضية التراكمية
             existingItem.weight += weight;
             existingItem.count += count;
             existingItem.itemTotal += itemTotal;
           } else {
-            // إذا لم يوجد، أنشئ عنصراً جديداً (بدون trader_name)
-            groups[dateKey].items.push({
-              product_name: productName,
-              weight,
-              count,
-              price,
-              itemTotal
-            });
+            groups[dateKey].items.push({ product_name: productName, weight, count, price, itemTotal });
           }
         }
       }
@@ -103,11 +115,7 @@ export default function Drivers() {
       setDailyGroups(groups);
       
       const dates = Object.keys(groups);
-      if (dates.length > 0) {
-        setActiveDateKey(dates[0]);
-      } else {
-        setActiveDateKey("");
-      }
+      setActiveDateKey(dates.length > 0 ? dates[0] : "");
 
     } catch (e) {
       alert("خطأ في جلب تفاصيل السائق: " + e.message);
@@ -116,45 +124,125 @@ export default function Drivers() {
     }
   };
 
+  // ─── ستايل الطباعة الموحّد (مطابق لصفحتي Invoices و TradersDebts) ──────
+  const getPrintStyles = () => `
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
+    body {
+      margin: 0;
+      padding: 0;
+      direction: rtl;
+      background-color: #fff;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    @page {
+      size: A5 landscape;
+      margin: 0.4cm;
+    }
+    .invoice-book-container {
+      border: 2px solid #000 !important;
+      padding: 12px;
+      background-color: #fff !important;
+      font-family: 'Cairo', sans-serif;
+      box-sizing: border-box;
+      width: 100%;
+      height: 128mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .flex-row-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #000;
+      padding-bottom: 6px;
+    }
+    .flex-row-info {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      border-bottom: 1px solid #000;
+      padding-bottom: 6px;
+      font-size: 12px;
+    }
+    .info-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      width: 48%;
+    }
+    .dotted-line {
+      border-bottom: 1px dotted #000;
+      flex-grow: 1;
+      padding-bottom: 2px;
+      font-weight: bold;
+      font-size: 13px;
+    }
+    .invoice-book-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    .invoice-book-table th {
+      background-color: #7f1d1d !important;
+      color: #ffffff !important;
+      border: 1px solid #000 !important;
+      font-weight: bold;
+      text-align: center;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .invoice-book-table td {
+      border: 1px solid #000 !important;
+      text-align: center;
+      color: #000 !important;
+    }
+    .footer-row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      font-size: 12px;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .signatures {
+      display: flex;
+      justify-content: space-around;
+      width: 60%;
+    }
+    .border-box-office { border: 1px solid #000; padding: 2px 8px; font-weight: bold; font-size: 12px; border-radius: 3px; }
+    .no-print { display: none !important; }
+  `;
+
+  const executePrint = (htmlContent) => {
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0;";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(`
+      <html>
+        <head>
+          <title>طباعة كشف السائق</title>
+          <style>${getPrintStyles()}</style>
+        </head>
+        <body>${htmlContent}</body>
+      </html>
+    `);
+    doc.close();
+
+    iframe.contentWindow.focus();
+    setTimeout(() => {
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+    }, 350);
+  };
+
   const handlePrint = () => {
-    if (!activeDateKey || !dailyGroups[activeDateKey]) return;
-    
-    const printContent = printRef.current.innerHTML;
-    const originalContent = document.body.innerHTML;
-    
-    const style = document.createElement('style');
-    style.innerHTML = `
-      @media print {
-        @page { size: A5 landscape; margin: 5mm; }
-        html, body { height: 100%; margin: 0; padding: 0; background: white; color: black; direction: rtl; font-family: 'Segoe UI', Tahoma, sans-serif; }
-        
-        .invoice-book-container { 
-          border: 2px solid #000; padding: 12px; background: #fff; 
-          box-sizing: border-box; width: 100%; max-width: 100%;
-          display: flex; flex-direction: column; justify-content: space-between;
-          height: 135mm; 
-        }
-        
-        .invoice-main-content { flex-grow: 1; display: flex; flex-direction: column; }
-        .flex-row-header { display: flex; justify-content: space-between; align-items: center; border-b: 2px solid #000; padding-bottom: 5px; margin-bottom: 8px; }
-        .border-box-office { border: 2px solid #000; padding: 2px 6px; font-weight: bold; font-size: 11px; background: #f9f9f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .flex-row-info { display: flex; justify-content: space-between; margin-bottom: 8px; gap: 10px; }
-        .info-item { flex: 1; display: flex; align-items: flex-end; font-size: 12px; }
-        .dotted-line { flex: 1; border-b: 1px dotted #000; margin-right: 4px; padding-bottom: 1px; }
-        
-        .invoice-book-table { width: 100%; border-collapse: collapse; margin-top: 5px; flex-grow: 1; }
-        .invoice-book-table th { background-color: #eaeaea !important; font-weight: bold; padding: 5px; font-size: 11px; border: 1px solid #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .invoice-book-table td { padding: 4px; font-size: 11px; border: 1px solid #000; line-height: 1.2; }
-        
-        .invoice-footer-section { margin-top: auto; width: 100%; }
-        .no-print { display: none !important; }
-      }
-    `;
-    document.head.appendChild(style);
-    document.body.innerHTML = printContent;
-    window.print();
-    document.body.innerHTML = originalContent;
-    window.location.reload(); 
+    if (!activeGroup || !printRef.current) return;
+    executePrint(printRef.current.innerHTML);
   };
 
   function openAdd() { setEditRow(null); setForm(EMPTY); setShowForm(true); }
@@ -178,9 +266,7 @@ export default function Drivers() {
       else await createDriver(form);
       setShowForm(false); await load();
     } catch (e) { alert("خطأ: " + e.message); }
-    finally {
-      setSaving(false);
-    }
+    finally { setSaving(false); }
   }
 
   const columns = [
@@ -192,8 +278,13 @@ export default function Drivers() {
 
   const activeGroup = dailyGroups[activeDateKey];
   const minRows = 4;
-  const blankRowsCount = activeGroup ? (activeGroup.items.length < minRows ? minRows - activeGroup.items.length : 0) : 0;
-  const [loadingDetails, setLoadingDetails] = useState(false);
+  const blankRowsCount = activeGroup && activeGroup.items.length < minRows ? minRows - activeGroup.items.length : 0;
+
+  // مقاسات الطباعة الديناميكية بناءً على عدد بنود اليوم النشط
+  const printMetrics = useMemo(
+    () => getDynamicPrintMetrics(activeGroup ? Math.max(activeGroup.items.length, minRows) : minRows),
+    [activeGroup]
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -247,7 +338,6 @@ export default function Drivers() {
           {loadingDetails ? <div className="text-center py-12 text-muted-foreground">جارٍ تجميع الحسابات...</div> : (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
               
-              {/* أزرار التحكم والتبديل الجانبية بين التواريخ */}
               <div className="flex flex-col gap-1.5 bg-muted/30 p-3 rounded-xl border border-border/80 md:col-span-1">
                 <span className="text-xs font-bold text-muted-foreground px-1 mb-1 block">تواريخ المبيعات المتاحة</span>
                 {Object.keys(dailyGroups).length === 0 ? (
@@ -265,56 +355,53 @@ export default function Drivers() {
                 )}
               </div>
 
-              {/* عرض ومعاينة القائمة النشطة المحددة فقط */}
               <div className="md:col-span-3">
                 {activeGroup ? (
                   <div ref={printRef}>
-                    <div className="invoice-book-container w-full border-2 border-black p-4 bg-background shadow-sm">
-                      
-                      <div className="invoice-main-content">
-                        <div className="flex-row-header flex justify-between items-center border-b-2 border-black pb-2 mb-2">
+                    <div className="invoice-book-container">
+                      <div>
+                        <div className="flex-row-header">
                           <div style={{ textAlign: 'right' }}>
                             <h2 className="text-lg font-black text-red-900" style={{ margin: 0 }}>{marketName}</h2>
                             <p style={{ margin: '2px 0 0 0', fontSize: '10px', fontWeight: 'bold', color: '#000' }}>مُجاز لبيع الفواكه والخُضر بالجملة</p>
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                            <div className="border-box-office text-black border-2 border-black px-2 py-0.5 font-bold bg-gray-50 text-xs">رقم المكتب ( ٣٥ )</div>
+                            <div className="border-box-office" style={{ color: '#000' }}>رقم المكتب ( ٣٥ )</div>
                             <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#000' }}>المركبة: {selectedDriver.vehicle_plate || "—"}</div>
                           </div>
                         </div>
 
-                        <div className="flex-row-info flex justify-between mb-2 text-black text-xs">
-                          <div className="info-item flex-1 flex items-end">
-                            <span className="font-bold whitespace-nowrap">السائق :</span>
-                            <span className="dotted-line border-b border-dotted border-black flex-1 mr-1">{selectedDriver.name}</span>
+                        <div className="flex-row-info" style={{ color: '#000' }}>
+                          <div className="info-item">
+                            <span className="font-bold">السائق :</span>
+                            <span className="dotted-line">{selectedDriver.name}</span>
                           </div>
-                          <div className="info-item flex-1 flex items-end">
-                            <span className="font-bold whitespace-nowrap">التاريخ :</span>
-                            <span className="dotted-line border-b border-dotted border-black flex-1 mr-1 font-mono">{activeGroup.date}</span>
+                          <div className="info-item">
+                            <span className="font-bold">التاريخ :</span>
+                            <span className="dotted-line" style={{ fontFamily: 'monospace' }}>{activeGroup.date}</span>
                           </div>
                         </div>
 
-                        {/* 🛑 تم تعديل الهيدر وحذف عمود التاجر هنا */}
-                        <table className="invoice-book-table w-full border-collapse border border-black">
+                        <table className="invoice-book-table" style={{ fontSize: `${printMetrics.fontSize}px` }}>
                           <thead>
-                            <tr className="bg-gray-100 border-b border-black text-xs font-bold text-black">
-                              <th style={{ width: "6%", border: "1px solid black" }}>ت</th>
-                              <th style={{ width: "34%", border: "1px solid black" }}>المادة</th>
-                              <th style={{ width: "12%", border: "1px solid black" }}>العدد الكلي</th>
-                              <th style={{ width: "16%", border: "1px solid black" }}>الوزن الإجمالي</th>
-                              <th style={{ width: "16%", border: "1px solid black" }}>السعر</th>
-                              <th style={{ width: "16%", border: "1px solid black" }}>المبلغ الصافي</th>
+                            <tr>
+                              <th style={{ width: "6%", padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}>ت</th>
+                              <th style={{ width: "34%", padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}>المادة</th>
+                              <th style={{ width: "12%", padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}>العدد الكلي</th>
+                              <th style={{ width: "16%", padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}>الوزن الإجمالي</th>
+                              <th style={{ width: "16%", padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}>السعر</th>
+                              <th style={{ width: "16%", padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}>المبلغ الصافي</th>
                             </tr>
                           </thead>
                           <tbody>
                             {activeGroup.items.map((it, idx) => (
-                              <tr key={idx} className="border-b border-black text-center text-xs font-medium text-black">
-                                <td style={{ border: "1px solid black" }}>{idx + 1}</td>
-                                <td style={{ border: "1px solid black", fontWeight: '700' }}>{it.product_name}</td>
-                                <td style={{ border: "1px solid black" }} className="font-mono">{it.count.toLocaleString("en-US")}</td>
-                                <td style={{ border: "1px solid black" }} className="font-mono">{it.weight.toLocaleString("en-US")}</td>
-                                <td style={{ border: "1px solid black" }} className="font-mono">{it.price.toLocaleString("en-US")}</td>
-                                <td style={{ border: "1px solid black" }} className="font-bold font-mono">{it.itemTotal.toLocaleString("en-US")}</td>
+                              <tr key={idx}>
+                                <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}>{idx + 1}</td>
+                                <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px`, fontWeight: '700' }}>{it.product_name}</td>
+                                <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }} className="font-mono">{it.count.toLocaleString("en-US")}</td>
+                                <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }} className="font-mono">{it.weight.toLocaleString("en-US")}</td>
+                                <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }} className="font-mono">{it.price.toLocaleString("en-US")}</td>
+                                <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px`, fontWeight: '700' }} className="font-mono">{it.itemTotal.toLocaleString("en-US")}</td>
                               </tr>
                             ))}
 
@@ -322,13 +409,13 @@ export default function Drivers() {
                               Array.from({ length: blankRowsCount }).map((_, index) => {
                                 const rowNum = activeGroup.items.length + index + 1;
                                 return (
-                                  <tr key={`empty-${rowNum}`} className="border-b border-black text-center">
-                                    <td style={{ border: "1px solid black", padding: '4px' }} className="text-gray-400 text-[10px]">{rowNum}</td>
-                                    <td style={{ border: "1px solid black" }}></td>
-                                    <td style={{ border: "1px solid black" }}></td>
-                                    <td style={{ border: "1px solid black" }}></td>
-                                    <td style={{ border: "1px solid black" }}></td>
-                                    <td style={{ border: "1px solid black" }}></td>
+                                  <tr key={`empty-${rowNum}`}>
+                                    <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }} className="text-gray-400">{rowNum}</td>
+                                    <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}></td>
+                                    <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}></td>
+                                    <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}></td>
+                                    <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}></td>
+                                    <td style={{ padding: `${printMetrics.cellPadY}px ${printMetrics.cellPadX}px` }}></td>
                                   </tr>
                                 );
                               })
@@ -337,26 +424,21 @@ export default function Drivers() {
                         </table>
                       </div>
 
-                      <div className="invoice-footer-section">
-                        <div className="flex justify-between items-start mt-3 text-black text-xs">
-                          <div className="flex flex-col gap-0.5 border border-black p-1.5 bg-gray-50 min-w-[220px]">
-                            <div className="flex justify-between">
-                              <span>الحساب الإجمالي:</span>
-                              <span className="font-bold">{formatMoney(activeGroup.salesTotal)}</span>
-                            </div>
+                      <div>
+                        <div className="footer-row" style={{ justifyContent: 'space-between', color: '#000' }}>
+                          <div style={{ border: '1px solid #000', padding: '4px 8px', background: '#f9fafb', fontSize: '11px', minWidth: '200px' }}>
+                            <span>الحساب الإجمالي: </span>
+                            <span className="font-bold">{formatMoney(activeGroup.salesTotal)}</span>
                           </div>
-
-                          <div className="signatures flex-1 flex justify-around pt-4 text-[10px] font-bold">
+                          <div className="signatures" style={{ fontSize: '10px' }}>
                             <div>توقيع مستلم القوائم</div>
                             <div>توقيع الحسابات</div>
                           </div>
                         </div>
-
-                        <div className="mt-2 text-[9px] text-gray-600 border-t border-dashed border-black pt-1">
+                        <div style={{ marginTop: '6px', fontSize: '9px', color: '#4b5563', borderTop: '1px dashed #000', paddingTop: '4px' }}>
                           <span>ملاحظات: {activeGroup.notesSummary.join(" | ") || "لا يوجد ملاحظات إضافية."}</span>
                         </div>
                       </div>
-
                     </div>
                   </div>
                 ) : (
@@ -369,7 +451,6 @@ export default function Drivers() {
         </div>
       )}
 
-      {/* مودال النماذج */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-background rounded-lg shadow-xl border border-border w-full max-w-md mx-4">

@@ -47,7 +47,7 @@ export default function Reports() {
     try {
       setLoading(true); setError(null);
       
-      // 1. فلاتر الفواتير: نطاق الوقت الكامل لتغطية الفواتير المخزنة بـ TimeStamp
+      // 1. فلاتر القوائم: نطاق الوقت الكامل لتغطية القوائم المخزنة بـ TimeStamp
       const filterFrom = from ? `${from}T00:00:00` : null;
       const filterTo = to ? `${to}T23:59:59` : null;
       
@@ -158,9 +158,9 @@ export default function Reports() {
 
   // تحديد اسم كارت الدخل بناءً على الفلتر المختار
   const getIncomeLabel = () => {
-    if (activeFilter === "today") return "الدخل اليومي الفعلي";
-    if (activeFilter === "month") return "الدخل الشهري الفعلي";
-    return "الدخل الفعلي المحصل";
+    if (activeFilter === "today") return "الدخل اليومي ";
+    if (activeFilter === "month") return "الدخل الشهري ";
+    return "الدخل  ";
   };
 
   // ─── تعريف أعمدة جداول البيانات ──────────────────────────────────────────
@@ -237,9 +237,9 @@ export default function Reports() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {[
           { label: getIncomeLabel(), value: formatMoney(realIncome), color: "text-emerald-700 bg-emerald-50/50 border-emerald-200/60" },
-          { label: "العمولة الواصلة",   value: formatMoney(calculatedMetrics.paidCommission),  color: "text-primary bg-primary/5 border-primary/10" },
-          { label: "الحمالية الواصلة",  value: formatMoney(calculatedMetrics.paidPorterage), color: "text-blue-600 bg-blue-50/40 border-blue-200/50" },
-          { label: "إيراد السلات الواصلة", value: formatMoney(calculatedMetrics.paidBaskets), color: "text-amber-700 bg-amber-50/40 border-amber-200/50" },
+          { label: "العمولة ",   value: formatMoney(calculatedMetrics.paidCommission),  color: "text-primary bg-primary/5 border-primary/10" },
+          { label: "الحمالية ",  value: formatMoney(calculatedMetrics.paidPorterage), color: "text-blue-600 bg-blue-50/40 border-blue-200/50" },
+          { label: "إيراد السلات ", value: formatMoney(calculatedMetrics.paidBaskets), color: "text-amber-700 bg-amber-50/40 border-amber-200/50" },
           { label: "الديون المسددة (للمدة)", value: formatMoney(totalSettledDebts),  color: "text-purple-600 bg-purple-50/40 border-purple-200/50" },
         ].map(card => (
           <div key={card.label} className={`rounded-xl border p-4 shadow-sm transition-all ${card.color || 'bg-card border-border'}`}>
@@ -257,7 +257,7 @@ export default function Reports() {
       </div>
 
       <div className="flex gap-1 border-b border-border">
-        {[["invoices","الفواتير المُرحّلة"],["traders","أرصدة التجار"],["payments","الدفعات"]].map(([key, label]) => (
+        {[["invoices","القوائم المُرحّلة"],["traders","أرصدة التجار"],["payments","التسديدات"]].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
             {label}
