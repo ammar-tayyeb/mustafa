@@ -70,7 +70,7 @@ npm install @tauri-apps/plugin-dialog @tauri-apps/plugin-fs
 npm install react-router
 ```
 - بناء `AppLayout`: قائمة جانبية (Sidebar) عربية + منطقة محتوى.
-- صفحات: لوحة المعلومات، البگاگيل، المركبات/السائقون، العمال، الفواتير، السلال، الأجور، سجل المعاملات، التقارير، الإعدادات/النسخ الاحتياطي.
+- صفحات: لوحة المعلومات، التجار، المركبات/السائقون، العمال، الفواتير، السلال، الأجور، سجل المعاملات، التقارير، الإعدادات/النسخ الاحتياطي.
 
 **مخرجات المرحلة:** RTL يعمل + اتصال SQLite + أول migration يُنفّذ تلقائيًا + هيكل تنقّل كامل.
 
@@ -97,7 +97,7 @@ is_deleted  INTEGER NOT NULL DEFAULT 0
 
 ### الجداول (ملف `0001_init.sql`)
 ```text
-traders          (البگاگيل + رصيد الدين)
+traders          (التجار + رصيد الدين)
 vehicles         (المركبات)
 drivers          (السائقون)
 workers          (العمال)
@@ -105,6 +105,6 @@ invoices         (القوائم/الفواتير + حالة draft/posted)
 invoice_items    (الشحنات الموزونة داخل القائمة)
 basket_counts    (عدد السلال)
 worker_wages     (أجور العمال)
-payments         (دفعات البگاگيل / تسوية الديون)
+payments         (دفعات التجار / تسوية الديون)
 transactions_log (سجل المعاملات الشامل)
 settings         (إعدادات عامة: نسبة عarket Management System)

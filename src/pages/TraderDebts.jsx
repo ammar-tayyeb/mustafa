@@ -23,7 +23,7 @@ export default function TradersDebts() {
     });
   }, []);
 
-  // تحميل البگاگيل المسجلين لديهم ديون
+  // تحميل التجار المسجلين لديهم ديون
   const loadTraders = useCallback(async () => {
     const res = await getTraders();
     setTraders(res.filter(t => t.debt_fils > 0));
@@ -31,7 +31,7 @@ export default function TradersDebts() {
 
   useEffect(() => { loadTraders(); }, [loadTraders]);
 
-  // تصفية البگاگيل حركياً بناءً على نص البحث
+  // تصفية التجار حركياً بناءً على نص البحث
   const filteredTraders = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return traders;
@@ -383,10 +383,10 @@ export default function TradersDebts() {
         }
       `}</style>
 
-      {/* القسم الأيمن: قائمة البگاگيل */}
+      {/* القسم الأيمن: قائمة التجار */}
       <div className="md:col-span-4 border border-border rounded-xl bg-card p-4 flex flex-col gap-4 overflow-y-auto no-print">
         <div>
-          <h3 className="font-bold text-lg">أرصدة ديون البگاگيل</h3>
+          <h3 className="font-bold text-lg">أرصدة ديون التجار</h3>
           <p className="text-xs text-muted-foreground">اختر بگال لعرض تفاصيل قوائمه</p>
         </div>
 

@@ -6,7 +6,7 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
 -- =============================================
--- جدول البگاگيل
+-- جدول التجار
 -- =============================================
 CREATE TABLE IF NOT EXISTS traders (
     id          TEXT PRIMARY KEY,

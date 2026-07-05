@@ -153,7 +153,7 @@ export default function Traders() {
           columns={columns}
           data={traders}
           searchKeys={["name", "phone"]}
-          emptyText="لا يوجد بگاگيل مسجّلون"
+          emptyText="لا يوجد تجار مسجّلون"
           actions={row => (
             <div className="flex items-center gap-1">
               <button

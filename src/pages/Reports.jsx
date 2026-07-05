@@ -253,11 +253,11 @@ export default function Reports() {
       <div className="grid grid-cols-3 gap-4 max-w-md bg-muted/30 px-4 py-2.5 rounded-lg border border-border/60 text-xs font-medium">
         <div className="flex justify-between"><span className="text-muted-foreground">مبيعات المدة:</span> <span className="font-semibold font-sans">{formatMoney(totalSales, "")}</span></div>
         <div className="flex justify-between border-x px-4 border-border"><span className="text-muted-foreground">الواصل الفوري:</span> <span className="font-semibold text-green-600 font-sans">{formatMoney(totalPaidInvs, "")}</span></div>
-        <div className="flex justify-between"><span className="text-muted-foreground">ديون البگاگيل الكلية:</span> <span className="font-semibold text-destructive font-sans">{formatMoney(totalDebt, "")}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">ديون التجار الكلية:</span> <span className="font-semibold text-destructive font-sans">{formatMoney(totalDebt, "")}</span></div>
       </div>
 
       <div className="flex gap-1 border-b border-border">
-        {[["invoices","الفواتير المُرحّلة"],["traders","أرصدة البگاگيل"],["payments","الدفعات"]].map(([key, label]) => (
+        {[["invoices","الفواتير المُرحّلة"],["traders","أرصدة التجار"],["payments","الدفعات"]].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
             {label}
@@ -270,7 +270,7 @@ export default function Reports() {
       {loading ? <div className="text-center py-12 text-muted-foreground">جارٍ تصفية البيانات وحساب المبالغ المسددة حالياً...</div> : (
         <div className="bg-background rounded-lg border border-border p-1 shadow-sm">
           {tab === "invoices" && <DataTable columns={invColumns} data={invoices} searchKeys={["trader_name","date"]} emptyText="لا توجد فواتير مُرحّلة للمدة المحددة" />}
-          {tab === "traders"  && <DataTable columns={traderColumns} data={traders} searchKeys={["name","phone"]} emptyText="لا يوجد بگاگيل" />}
+          {tab === "traders"  && <DataTable columns={traderColumns} data={traders} searchKeys={["name","phone"]} emptyText="لا يوجد تجار" />}
           {tab === "payments" && <DataTable columns={payColumns} data={payments} searchKeys={["trader_name","notes"]} emptyText="لا توجد تسديدات ديون مسجلة للمدة المحددة" />}
         </div>
       )}
