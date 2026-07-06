@@ -11,15 +11,14 @@ import { findOrCreateTrader, findOrCreateDriver } from "../lib/findOrCreate.js";
 import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import EntityCombobox from "../components/EntityCombobox.jsx";
+import { SmallProductCombobox } from "../components/SmallProductCombobox.jsx";
 
-// دالة مساعدة لتوليد التاريخ والوقت المحلي بدقة دون التحويل إلى UTC (لتفادي مشكلة الـ 3am)
 function getLocalDateTimeString() {
   const tzoffset = (new Date()).getTimezoneOffset() * 60000; 
   const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 19);
   return localISOTime; 
 }
 
-// دالة مساعدة لتنسيق الأرقام بالفواصل مع إجبار النظام اللاتيني (الإنجليزي)
 function formatNumberWithCommas(value) {
   if (value === null || value === undefined || value === "") return "";
   const cleanValue = value.toString().replace(/,/g, "");
@@ -30,7 +29,6 @@ function formatNumberWithCommas(value) {
   return parts.join(".");
 }
 
-// دالة مساعدة لتنظيف النص من الفواصل وتحويله إلى رقم جاهز للحسابات
 function cleanCommas(value) {
   if (!value) return 0;
   const cleaned = value.toString().replace(/,/g, "");
@@ -43,7 +41,6 @@ function normalizeBasketWeightEach(value) {
   return numericValue > 10 ? numericValue / 100 : numericValue;
 }
 
-// ─── بند فارغ (مع قيمة افتراضية حقيقية للحمالية 250) ─────────────────────────
 function emptyItem(defaults = {}) {
   return {
     _key: crypto.randomUUID(),
@@ -61,8 +58,7 @@ function emptyItem(defaults = {}) {
   };
 }
 
-// ─── صف بند القائمة ──────────────────────────────────────────────────
-function ItemRow({ item, defaultCommission, defaultBasketWeightEach, defaultBasketPrice, defaultPorterage, onChange, onRemove }) {
+function ItemRow({ item, productItems, defaultCommission, defaultBasketWeightEach, defaultBasketPrice, defaultPorterage, onChange, onRemove }) {
   const c = item.computed;
   const cleanPorterage = cleanCommas(item.porterage);
   const effectivePorterage = item.porterage !== "" ? cleanPorterage : defaultPorterage;
@@ -111,8 +107,12 @@ function ItemRow({ item, defaultCommission, defaultBasketWeightEach, defaultBask
       <div className="grid grid-cols-5 gap-1">
         <div className="col-span-2">
           <span className={labelClass}>اسم المادة</span>
-          <input value={item.product_name} onChange={e => field("product_name", e.target.value)}
-            className="w-full rounded border border-input bg-background px-1.5 py-0.5 text-[11px] h-6 outline-none focus:ring-1 focus:ring-ring text-right" required placeholder="المادة *" />
+          <SmallProductCombobox 
+            items={productItems}
+            value={item.product_name}
+            onChange={(id, label) => field("product_name", label)}
+            placeholder="بحث..."
+          />
         </div>
         <div>
           <span className={labelClass}>الوزن الكلي</span>
@@ -182,7 +182,6 @@ function ItemRow({ item, defaultCommission, defaultBasketWeightEach, defaultBask
   );
 }
 
-// ─── الصفحة الرئيسية ─────────────────────────────────────────────────────────
 export default function Invoices() {
   const [invoices, setInvoices]   = useState([]);
   const [traders, setTraders]     = useState([]);
@@ -219,6 +218,15 @@ export default function Invoices() {
     basketPrice: defaultBasketPrice.toString(),
     porterage: defaultPorterage.toString(),
   }), [defaultBasketWeightEach, defaultBasketPrice, defaultPorterage]);
+
+  const productItems = useMemo(() => {
+    const prodList = settings.products_list ?? "";
+    return prodList
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+      .map(name => ({ id: name, label: name }));
+  }, [settings.products_list]);
 
   const load = useCallback(async () => {
     try {
@@ -302,19 +310,15 @@ export default function Invoices() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  // دالة لجلب البيانات وتجهيزها فقط
   async function handlePrintDirectly(inv) {
     const its = await getInvoiceItems(inv.id);
     setViewInv(inv);
     setViewItems(its);
   }
 
-  // تأثير (Effect) يراقب اكتمال حقن البيانات داخل الفاتورة ثم يقوم بالطباعة بدقة
   useEffect(() => {
     if (viewInv && viewItems.length > 0) {
-      // إطلاق أمر الطباعة فوراً بعد التأكد من اكتمال الرندرة في المتصفح
       window.print();
-      // تصفير البيانات بعد إغلاق نافذة الطباعة ليعود سجل المبيعات طبيعياً
       setViewInv(null);
       setViewItems([]);
     }
@@ -556,7 +560,6 @@ export default function Invoices() {
         }
         .border-box-office { border: 1px solid #000; padding: 2px 8px; font-weight: bold; font-size: 12px; border-radius: 3px; }
         
-        /* جعل العنصر مخفياً في العرض العادي، لكنه يظهر بشكل كامل أثناء عملية الطباعة */
         .hidden-print-preview {
           display: none;
         }
@@ -590,7 +593,7 @@ export default function Invoices() {
             </div>
             <div className="space-y-1 max-h-[240px] overflow-y-auto pr-0.5">
               {items.map(item => (
-                <ItemRow key={item._key} item={item} defaultCommission={defaultCommission}
+                <ItemRow key={item._key} item={item} productItems={productItems} defaultCommission={defaultCommission}
                   defaultBasketWeightEach={defaultBasketWeightEach}
                   defaultBasketPrice={defaultBasketPrice}
                   defaultPorterage={defaultPorterage}
@@ -668,7 +671,7 @@ export default function Invoices() {
         )}
       </div>
 
-      {/* ─── المكون المخفي المخصص للطباعة الفورية (يظهر فقط في الـ media print) ─── */}
+      {/* ─── المكون المخفي المخصص للطباعة الفورية ─── */}
       {viewInv && viewItems.length > 0 && (
         <div className="hidden-print-preview print-area">
           <div className="invoice-book-container">

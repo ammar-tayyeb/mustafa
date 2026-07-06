@@ -160,6 +160,7 @@ async function ensureDesktopSchema(db) {
   await addColumnIfMissing(db, "drivers", "created_at", "TEXT");
   await addColumnIfMissing(db, "drivers", "updated_at", "TEXT");
   await addColumnIfMissing(db, "drivers", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "drivers", "debt_fils", "INTEGER NOT NULL DEFAULT 0");
 
   await addColumnIfMissing(db, "invoice_items", "invoice_id", "TEXT NOT NULL");
   await addColumnIfMissing(db, "invoice_items", "product_name", "TEXT NOT NULL");
@@ -456,12 +457,18 @@ export async function postInvoice(invoiceId) {
 
   await db.execute("UPDATE invoices SET status='posted', updated_at=? WHERE id=?", [ts, invoiceId]);
 
-  if (inv.remaining > 0 && inv.trader_id) {
-    await db.execute(
-      "UPDATE traders SET debt_fils = debt_fils + ?, updated_at=? WHERE id=?",
-      [inv.remaining, ts, inv.trader_id]
-    );
-  }
+  // if (inv.remaining > 0 && inv.trader_id) {
+  //   await db.execute(
+  //     "UPDATE traders SET debt_fils = debt_fils + ?, updated_at=? WHERE id=?",
+  //     [inv.remaining, ts, inv.trader_id]
+  //   );
+  // }
+  if (inv.remaining > 0 && inv.driver_id) {
+  await db.execute(
+    "UPDATE drivers SET debt_fils = debt_fils + ?, updated_at=? WHERE id=?",
+    [inv.remaining, ts, inv.driver_id]
+  );
+}
 
   await db.execute(
     `INSERT INTO transactions_log (id, type, ref_id, trader_id, amount, description, date, created_at)
@@ -494,12 +501,13 @@ export async function reverseInvoice(invoiceId) {
 
   await db.execute("UPDATE invoices SET status='draft', updated_at=? WHERE id=?", [ts, invoiceId]);
 
-  if (inv.remaining > 0 && inv.trader_id) {
-    await db.execute(
-      "UPDATE traders SET debt_fils = debt_fils - ?, updated_at=? WHERE id=?",
-      [inv.remaining, ts, inv.trader_id]
-    );
-  }
+  if (inv.remaining > 0 && inv.driver_id) {
+  await db.execute(
+    "UPDATE drivers SET debt_fils = debt_fils - ?, updated_at=? WHERE id=?",
+    [inv.remaining, ts, inv.driver_id]
+  );
+}
+
 
   await db.execute(
     `INSERT INTO transactions_log (id, type, ref_id, trader_id, amount, description, date, created_at)
@@ -507,6 +515,84 @@ export async function reverseInvoice(invoiceId) {
     [uuid(), invoiceId, inv.trader_id, inv.total_final,
      `عكس فاتورة — ${inv.trader_name ?? ""}`, inv.date, ts]
   );
+}
+// جلب ديون سائق معين
+export async function getDriverDebt(driverId) {
+  if (!isTauriRuntime()) {
+    const driver = getFallbackRecords("drivers").find(d => d.id === driverId && d.is_deleted !== 1);
+    return driver?.debt_fils ?? 0;
+  }
+  const db = await getDb();
+  const rows = await db.select("SELECT debt_fils FROM drivers WHERE id=? AND is_deleted=0", [driverId]);
+  return rows[0]?.debt_fils ?? 0;
+}
+
+// دفع دين السائق
+export async function payDriverDebt({ driver_id, amount, date, notes = null }) {
+  const ts = now();
+  
+  if (!isTauriRuntime()) {
+    const driverDebt = (await getDriverDebt(driver_id)) || 0;
+    const newDebt = Math.max(0, driverDebt - amount);
+    
+    updateFallbackRecord("drivers", driver_id, row => ({
+      ...row,
+      debt_fils: newDebt,
+      updated_at: ts
+    }));
+    
+    const paymentId = uuid();
+    pushFallbackRecord("payments", {
+      id: paymentId,
+      trader_id: driver_id,  // نستخدم driver_id في حقل trader_id مؤقتاً
+      amount,
+      date,
+      notes: (notes || "") + " (دفع دين سائق)",
+      is_deleted: 0,
+      created_at: ts,
+      updated_at: ts
+    });
+    
+    return paymentId;
+  }
+  
+  const db = await getDb();
+  const paymentId = uuid();
+  
+  // تحديث ديون السائق
+  await db.execute(
+    "UPDATE drivers SET debt_fils = MAX(0, debt_fils - ?), updated_at=? WHERE id=?",
+    [amount, ts, driver_id]
+  );
+  
+  // تسجيل الدفع
+  await db.execute(
+    "INSERT INTO payments (id, trader_id, amount, date, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [paymentId, driver_id, amount, date, (notes || "") + " (دفع دين سائق)", ts, ts]
+  );
+  
+  return paymentId;
+}
+
+// جلب جميع السواق بديونهم
+export async function getDriversWithDebts() {
+  if (!isTauriRuntime()) {
+    return getFallbackRecords("drivers")
+      .filter(d => d.is_deleted !== 1)
+      .map(d => ({
+        ...d,
+        debt_amount: (d.debt_fils || 0) / 100 // تحويل من فلس إلى دينار
+      }))
+      .sort((a, b) => b.debt_amount - a.debt_amount);
+  }
+  
+  const db = await getDb();
+  return db.select(`
+    SELECT *, debt_fils / 100.0 as debt_amount
+    FROM drivers
+    WHERE is_deleted=0
+    ORDER BY debt_fils DESC
+  `);
 }
 
 export async function deleteInvoice(id) {

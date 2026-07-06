@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Save, HardDrive, ShieldCheck, AlertCircle } from "lucide-react";
+import { Save, HardDrive, ShieldCheck, AlertCircle, Plus, Trash2 } from "lucide-react";
 import { getAllSettings, setSetting, isTauriRuntime } from "../lib/db.js";
 
 export default function Settings() {
@@ -15,6 +15,9 @@ export default function Settings() {
   const [basketWeight, setBasketWeight] = useState("");
   const [basketPrice,  setBasketPrice]  = useState("");
   const [porterage,    setPorterage]    = useState("");
+  const [productsList, setProductsList] = useState("");
+  const [productInput, setProductInput] = useState("");
+  const [products, setProducts]         = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -25,17 +28,20 @@ export default function Settings() {
       setMarketName(s.market_name ?? "");
       setCurrency(s.currency ?? "د.ع");
       
-      // إذا كانت القيمة المخزنة 500 تعني 5%، نقسمها على 100 ليراها المستخدم 5 مباشرة
       const rawComm = Number(s.default_commission ?? 500);
       setCommission((rawComm / 100).toString());
       
-      // قراءة وزن السلة كقيمة عشرية مع دعم القيم القديمة المخزنة بصيغة 50 = 0.5
       const rawWeight = Number(s.basket_weight ?? 0.5);
       const displayWeight = rawWeight > 10 ? rawWeight / 100 : rawWeight;
       setBasketWeight(displayWeight.toString());
 
       setBasketPrice(Number(s.basket_price ?? 250).toString());
       setPorterage(Number(s.porterage ?? 250).toString());
+      
+      const prodList = s.products_list ?? "";
+      setProductsList(prodList);
+      const prodArray = prodList.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+      setProducts(prodArray);
     } catch (e) { 
       setError(e.message); 
     } finally { 
@@ -44,6 +50,22 @@ export default function Settings() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleAddProduct = () => {
+    if (!productInput.trim()) return;
+    if (products.includes(productInput.trim())) {
+      alert("هذه المادة موجودة بالفعل");
+      return;
+    }
+    const updated = [...products, productInput.trim()];
+    setProducts(updated);
+    setProductInput("");
+  };
+
+  const handleRemoveProduct = (index) => {
+    const updated = products.filter((_, i) => i !== index);
+    setProducts(updated);
+  };
 
   async function handleSave(e) {
     e.preventDefault();
@@ -67,6 +89,7 @@ export default function Settings() {
       await setSetting("basket_weight", parsedBasketWeight);
       await setSetting("basket_price", parsedBasketPrice);
       await setSetting("porterage", parsedPorterage);
+      await setSetting("products_list", products.join('\n'));
       
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -140,7 +163,7 @@ export default function Settings() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-muted-foreground text-sm animate-pulse">
-          Reliable loading... جارٍ تحميل الإعدادات وتأمين الاتصال...
+          جارٍ تحميل الإعدادات وتأمين الاتصال...
         </div>
       ) : (
         <form onSubmit={handleSave} className="flex flex-col gap-6">
@@ -155,19 +178,16 @@ export default function Settings() {
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">نسبة العمولة الافتراضية (%)</label>
                 <div className="relative flex items-center">
-                  {/* تم نقل محاذاة النص لليسار والمؤشر لليمين ليناسب الرموز الجانبية المضافة بشكل مريح */}
                   <input type="number" min="0" max="100" step="0.1" value={commission}
                     onChange={e => setCommission(e.target.value)} className={`${inp} pl-8`} placeholder="5" required />
                   <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none select-none">%</span>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-normal mt-0.5">تُطبق تلقائياً كنسبة مئوية عند إنشاء قوائم وبنود جديدة.</p>
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">وزن السلة الافتراضي ($kg$)</label>
+                <label className="text-xs font-semibold text-muted-foreground">وزن السلة الافتراضي (kg)</label>
                 <div className="relative flex items-center">
-                  {/* ⚖️ تم إضافة رمز الوحدة "كغم" بشكل ثابت بداخل الحقل من الجهة اليسرى */}
-                  <input type="number"  step="0.1" value={basketWeight}
+                  <input type="number" step="0.1" value={basketWeight}
                     onChange={e => setBasketWeight(e.target.value)} className={`${inp} pl-12`} placeholder="0.5" required />
                   <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none select-none">كغم (kg)</span>
                 </div>
@@ -183,6 +203,48 @@ export default function Settings() {
                 <label className="text-xs font-semibold text-muted-foreground">الحمالية الافتراضية</label>
                 <input type="number" min="0" step="1" value={porterage}
                   onChange={e => setPorterage(e.target.value)} className={inp} placeholder="250" required />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border/80 bg-card p-5 shadow-sm flex flex-col gap-4 hover:shadow-md transition-shadow duration-200">
+            <h3 className="font-bold text-sm text-primary border-b border-border/40 pb-2">قائمة المواد المتاحة</h3>
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input 
+                  type="text"
+                  value={productInput}
+                  onChange={e => setProductInput(e.target.value)}
+                  onKeyPress={e => e.key === 'Enter' && (e.preventDefault(), handleAddProduct())}
+                  placeholder="إدخل اسم المادة..."
+                  className={`${inp} flex-1`}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddProduct}
+                  className="bg-primary text-primary-foreground px-3 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-1 whitespace-nowrap"
+                >
+                  <Plus size={16} /> إضافة
+                </button>
+              </div>
+
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {products.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">لا توجد مواد محفوظة</p>
+                ) : (
+                  products.map((product, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-muted/40 px-3 py-2 rounded-lg border border-border/30">
+                      <span className="text-sm font-medium">{product}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveProduct(idx)}
+                        className="text-destructive hover:text-destructive/80 transition-colors p-1"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
