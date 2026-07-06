@@ -65,7 +65,7 @@ export function SmallProductCombobox({ items = [], value = "", onChange, placeho
   const displayValue = items.find(item => item.id === value || item.label === value)?.label || value;
 
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div ref={containerRef} className="relative w-full ">
       <div className="relative">
         <input
           ref={inputRef}
@@ -92,7 +92,7 @@ export function SmallProductCombobox({ items = [], value = "", onChange, placeho
       </div>
 
       {open && filtered.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-0.5 bg-background border border-border rounded shadow-md z-50 max-h-48 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-0.5 bg-background border border-border rounded shadow-md z-50 max-h-20 overflow-y-scroll  scrollbar-none">
           {filtered.map((item, idx) => (
             <button
               key={item.id}

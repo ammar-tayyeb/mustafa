@@ -105,7 +105,7 @@ function ItemRow({ item, productItems, defaultCommission, defaultBasketWeightEac
   return (
     <div className="rounded border border-border bg-muted/20 p-1 flex flex-col gap-0.5 text-[11px]">
       <div className="grid grid-cols-5 gap-1">
-        <div className="col-span-2">
+        <div className="col-span-2  ">
           <span className={labelClass}>اسم المادة</span>
           <SmallProductCombobox 
             items={productItems}
@@ -326,8 +326,12 @@ export default function Invoices() {
 
   async function handleSave(e) {
     e.preventDefault();
-    if (!invForm.trader_label || !invForm.trader_label.trim()) {
+    if (!invForm.trader_label || !invForm.trader_label.trim() ) {
       alert("اسم البگال غير موجود");
+      return;
+    }
+    if (!invForm.driver_label || !invForm.driver_label.trim() ) {
+      alert("اسم السائق غير موجود");
       return;
     }
 
