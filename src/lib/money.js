@@ -30,22 +30,7 @@ export function formatWeight(intVal) {
   return n.toLocaleString("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " كجم";
 }
 
-/**
- * سلسلة حساب بند الفاتورة — الترتيب إلزامي
- *
- * المدخلات (كلها أرقام عشرية من المستخدم):
- *   grossWeight      — الوزن الكلي (كجم)
- *   basketCount      — عدد السلات
- *   basketWeightEach — وزن السلة الواحدة (كجم، افتراضي 0.5)
- *   price            — السعر لكل كجم
- *   basketPrice      — سعر السلة الواحدة
- *   commissionRate   — نسبة العمولة % (مثلاً 5)
- *   porterage        — الحمالية (مبلغ رقمي)
- *   manualFinal      — مبلغ نهائي يدوي (اختياري، يتجاوز الحساب)
- *
- * المخرجات (كلها أعداد صحيحة بالدينار):
- *   netWeight, amountBefore, commissionValue, amountAfterComm, finalAmount
- */
+
 export function computeInvoiceItem({
   grossWeight = 0, basketCount = 0, basketWeightEach = 0.5,
   price = 0, basketPrice = 0, commissionRate = 0, porterage = 0, manualFinal = null,
@@ -61,7 +46,7 @@ export function computeInvoiceItem({
   const netWeight = grossW - (bCount * bWeight);
   const amountBefore = Math.round(netWeight * priceI);
   const rawCommissionValue = Math.round(amountBefore * (commRate / 100));
-  const commissionValue = roundDownToStep(rawCommissionValue, 250);
+  const commissionValue = rawCommissionValue;
   const amountAfterComm = amountBefore + commissionValue;
   const basketPriceTotal = Math.round(bCount * basketPriceI);
   const autoFinal = amountAfterComm + porterageI + basketPriceTotal;

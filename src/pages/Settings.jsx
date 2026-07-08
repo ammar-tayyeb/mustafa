@@ -31,12 +31,12 @@ export default function Settings() {
       const rawComm = Number(s.default_commission ?? 500);
       setCommission((rawComm / 100).toString());
       
-      const rawWeight = Number(s.basket_weight ?? 0.5);
+      const rawWeight = Number(s.basket_weight ?? 0);
       const displayWeight = rawWeight > 10 ? rawWeight / 100 : rawWeight;
       setBasketWeight(displayWeight.toString());
 
-      setBasketPrice(Number(s.basket_price ?? 250).toString());
-      setPorterage(Number(s.porterage ?? 250).toString());
+      setBasketPrice(Number(s.basket_price ?? 0).toString());
+      setPorterage(Number(s.porterage ?? 0).toString());
       
       const prodList = s.products_list ?? "";
       setProductsList(prodList);
@@ -179,7 +179,7 @@ export default function Settings() {
                 <label className="text-xs font-semibold text-muted-foreground">نسبة العمولة الافتراضية (%)</label>
                 <div className="relative flex items-center">
                   <input type="number" min="0" max="100" step="0.1" value={commission}
-                    onChange={e => setCommission(e.target.value)} className={`${inp} pl-8`} placeholder="5" required />
+                    onChange={e => setCommission(e.target.value)} className={`${inp} pl-8`} placeholder="0" required />
                   <span className="absolute left-3 text-muted-foreground text-xs font-medium pointer-events-none select-none">%</span>
                 </div>
               </div>
@@ -195,13 +195,13 @@ export default function Settings() {
 
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">سعر السلة الافتراضي</label>
-                <input type="number" min="0" step="1" value={basketPrice}
+                <input type="number"  step="1" value={basketPrice}
                   onChange={e => setBasketPrice(e.target.value)} className={inp} placeholder="250" required />
               </div>
 
               <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <label className="text-xs font-semibold text-muted-foreground">الحمالية الافتراضية</label>
-                <input type="number" min="0" step="1" value={porterage}
+                <input type="number"  step="1" value={porterage}
                   onChange={e => setPorterage(e.target.value)} className={inp} placeholder="250" required />
               </div>
             </div>
