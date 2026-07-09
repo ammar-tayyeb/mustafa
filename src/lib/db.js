@@ -129,6 +129,28 @@ async function addColumnIfMissing(db, table, column, definition) {
 }
 
 async function ensureDesktopSchema(db) {
+  // ─── جدول القوائم المغلقة ───────────────────────────────────────────
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS driver_sheets (
+        id              TEXT PRIMARY KEY,
+        driver_id       TEXT NOT NULL REFERENCES drivers(id),
+        sheet_opened_at TEXT NOT NULL,
+        sheet_closed_at TEXT NOT NULL,
+        total_amount    INTEGER NOT NULL DEFAULT 0,
+        items_count     INTEGER NOT NULL DEFAULT 0,
+        notes           TEXT,
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        is_deleted      INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_driver_sheets_driver ON driver_sheets(driver_id) WHERE is_deleted=0");
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_driver_sheets_date ON driver_sheets(sheet_closed_at) WHERE is_deleted=0");
+  } catch (e) {
+    // جدول موجود مسبقاً
+  }
+
   await addColumnIfMissing(db, "traders", "phone", "TEXT");
   await addColumnIfMissing(db, "traders", "address", "TEXT");
   await addColumnIfMissing(db, "traders", "notes", "TEXT");
@@ -275,13 +297,79 @@ export async function openDriverSheet(driverId) {
   await db.execute("UPDATE drivers SET sheet_status='open', sheet_opened_at=?, is_paid=0, updated_at=? WHERE id=?", [ts, ts, driverId]);
 }
 
-/** إغلاق قائمة السائق — يختفي من حقل السائق في المبيعات */
+/** إغلاق قائمة السائق مع حفظ في جدول driver_sheets */
 export async function closeDriverSheet(driverId) {
   if (!isTauriRuntime()) {
-    updateFallbackRecord("drivers", driverId, row => ({ ...row, sheet_status: 'closed', updated_at: now() })); return;
+    const driver = getFallbackRecords("drivers").find(d => d.id === driverId);
+    if (!driver) return;
+    
+    // حساب إجمالي القائمة المغلقة
+    const sheetItems = getDriverSheetItemsSync(driverId, driver.sheet_opened_at);
+    const totalAmount = sheetItems.reduce((sum, item) => {
+      const itemAmount = roundDownToStep(item.net_weight * (item.price / 100), 250);
+      return sum + itemAmount;
+    }, 0);
+    
+    // حفظ في driver_sheets
+    const sheetId = uuid();
+    const ts = now();
+    const store = ensureFallbackStore();
+    store.driver_sheets = store.driver_sheets || [];
+    store.driver_sheets.push({
+      id: sheetId,
+      driver_id: driverId,
+      sheet_opened_at: driver.sheet_opened_at,
+      sheet_closed_at: ts,
+      total_amount: totalAmount,
+      items_count: sheetItems.length,
+      notes: null,
+      is_deleted: 0,
+      created_at: ts,
+      updated_at: ts,
+    });
+    persistFallbackStore(store);
+    
+    // تحديث حالة السائق
+    updateFallbackRecord("drivers", driverId, row => ({ ...row, sheet_status: 'closed', updated_at: ts }));
+    return;
   }
+  
   const db = await getDb();
-  await db.execute("UPDATE drivers SET sheet_status='closed', updated_at=? WHERE id=?", [now(), driverId]);
+  const driver = await db.select("SELECT sheet_opened_at FROM drivers WHERE id=?", [driverId]);
+  if (!driver[0]) return;
+  
+  const sheetItems = await db.select(`
+    SELECT ii.net_weight, ii.price FROM invoice_items ii
+    WHERE ii.driver_id = ? AND ii.is_deleted = 0
+    AND ii.created_at >= ?
+  `, [driverId, driver[0].sheet_opened_at || '']);
+  
+  const totalAmount = sheetItems.reduce((sum, item) => {
+    const itemAmount = roundDownToStep(item.net_weight * (item.price / 100), 250);
+    return sum + itemAmount;
+  }, 0);
+  
+  const ts = now();
+  const sheetId = uuid();
+  
+  // حفظ في driver_sheets
+  await db.execute(`
+    INSERT INTO driver_sheets (id, driver_id, sheet_opened_at, sheet_closed_at, total_amount, items_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `, [sheetId, driverId, driver[0].sheet_opened_at, ts, totalAmount, sheetItems.length, ts, ts]);
+  
+  // تحديث حالة السائق
+  await db.execute("UPDATE drivers SET sheet_status='closed', updated_at=? WHERE id=?", [ts, driverId]);
+}
+
+function roundDownToStep(value, step) {
+  if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return 0;
+  return Math.floor(value / step) * step;
+}
+
+function getDriverSheetItemsSync(driverId, sheetOpenedAt) {
+  return getFallbackRecords("invoice_items")
+    .filter(it => it.driver_id === driverId && it.is_deleted !== 1 && (!sheetOpenedAt || it.created_at >= sheetOpenedAt));
 }
 
 /** تبديل حالة الواصل/غير الواصل للسائق */
@@ -294,6 +382,39 @@ export async function toggleDriverPaid(driverId, isPaid) {
 }
 
 /** جلب بنود القائمة المفتوحة الحالية للسائق (منذ آخر فتح للقائمة) */
+/** جلب جميع القوائم المغلقة للسائق */
+export async function getClosedDriverSheets(driverId) {
+  if (!isTauriRuntime()) {
+    return getFallbackRecords("driver_sheets")
+      .filter(sheet => sheet.driver_id === driverId && sheet.is_deleted !== 1)
+      .sort((a, b) => (b.sheet_closed_at || '').localeCompare(a.sheet_closed_at || ''));
+  }
+  const db = await getDb();
+  return db.select(
+    "SELECT * FROM driver_sheets WHERE driver_id=? AND is_deleted=0 ORDER BY sheet_closed_at DESC",
+    [driverId]
+  );
+}
+
+/** جلب بنود قائمة مغلقة معينة */
+export async function getClosedSheetItems(driverId, sheetOpenedAt, sheetClosedAt) {
+  if (!isTauriRuntime()) {
+    return getFallbackRecords("invoice_items")
+      .filter(it => it.driver_id === driverId && it.is_deleted !== 1 && it.created_at >= sheetOpenedAt && it.created_at <= sheetClosedAt)
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }
+  const db = await getDb();
+  return db.select(`
+    SELECT ii.*, i.date, t.name as trader_name
+    FROM invoice_items ii
+    LEFT JOIN invoices i ON ii.invoice_id = i.id
+    LEFT JOIN traders t ON i.trader_id = t.id
+    WHERE ii.driver_id = ? AND ii.is_deleted = 0
+    AND ii.created_at >= ? AND ii.created_at <= ?
+    ORDER BY ii.created_at DESC
+  `, [driverId, sheetOpenedAt, sheetClosedAt]);
+}
+
 /** جلب بنود القائمة للسائق - تم تعديلها لتدعم القوائم المفتوحة والمغلقة للمعاينة */
 export async function getDriverSheetItems(driverId) {
   if (!isTauriRuntime()) {
@@ -650,4 +771,21 @@ export async function getAllSettings() {
   const db = await getDb();
   const rows = await db.select("SELECT key, value FROM settings");
   return Object.fromEntries(rows.map(r => [r.key, r.value]));
+}
+/** حذف قائمة مغلقة للسائق (حذف ناعم) */
+export async function deleteClosedSheet(sheetId) {
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("driver_sheets", sheetId, row => ({ 
+      ...row, 
+      is_deleted: 1, 
+      updated_at: now() 
+    })); 
+    return; 
+  }
+  
+  const db = await getDb();
+  await db.execute(
+    "UPDATE driver_sheets SET is_deleted=1, updated_at=? WHERE id=?", 
+    [now(), sheetId]
+  );
 }

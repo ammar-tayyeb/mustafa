@@ -19,9 +19,15 @@ export function formatMoney(intVal, currency = "د.ع") {
   return n.toLocaleString("en-US") + (currency ? " " + currency : "");
 }
 
-function roundDownToStep(value, step) {
+export function roundDownToStep(value, step) {
   if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return 0;
   return Math.floor(value / step) * step;
+}
+
+/** حساب مبلغ بند بسيط: صافي وزن × سعر، مقرب لأقرب 250 (بدون عمولة/حمالية/سعر سلة) */
+export function computeSimpleItemAmount(netWeight, price) {
+  const basicAmount = netWeight * price;
+  return roundDownToStep(basicAmount, 250);
 }
 
 /** تنسيق وزن للعرض */
