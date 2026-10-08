@@ -135,12 +135,12 @@ export default function Reports() {
         }
       }
 
-      // ─── جلب بنود قوائم السواق المغلقة وحساب إجمالي عمولاتها في Tauri ───
+      // ─── جلب بنود قوائم السواق المغلقة وحساب إجمالي عمولاتها ───
       let driverSheetsCommSum = 0;
       const processedClosedSheets = await Promise.all(
         (closedSheetsData || []).map(async (sheet) => {
           let items = [];
-          if (sheet.driver_id && sheet.sheet_opened_at && sheet.sheet_closed_at) {
+          if (sheet.driver_id) {
             try {
               items = await getClosedSheetItems(sheet.driver_id, sheet.sheet_opened_at, sheet.sheet_closed_at);
             } catch (err) {

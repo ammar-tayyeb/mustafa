@@ -128,8 +128,12 @@ export default function Transactions() {
     const merchantQuery = merchantSearchTerm.trim().toLowerCase();
 
     return unifiedLogs.filter(log => {
-      if (driverQuery) return log.personTypes.includes("driver") && log.driverName.toLowerCase().includes(driverQuery);
-      if (merchantQuery) return log.personTypes.includes("merchant") && log.merchantName.toLowerCase().includes(merchantQuery);
+      if (driverQuery && (!log.driverName || !log.driverName.toLowerCase().includes(driverQuery))) {
+        return false;
+      }
+      if (merchantQuery && (!log.merchantName || !log.merchantName.toLowerCase().includes(merchantQuery))) {
+        return false;
+      }
       return true;
     });
   }, [unifiedLogs, driverSearchTerm, merchantSearchTerm]);
@@ -296,20 +300,14 @@ export default function Transactions() {
           <input
             type="text"
             value={driverSearchTerm}
-            onChange={(event) => {
-              setDriverSearchTerm(event.target.value);
-              setMerchantSearchTerm("");
-            }}
+            onChange={(event) => setDriverSearchTerm(event.target.value)}
             placeholder="بحث عن سائق..."
             className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
           />
           <input
             type="text"
             value={merchantSearchTerm}
-            onChange={(event) => {
-              setMerchantSearchTerm(event.target.value);
-              setDriverSearchTerm("");
-            }}
+            onChange={(event) => setMerchantSearchTerm(event.target.value)}
             placeholder="بحث عن بقال..."
             className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
           />

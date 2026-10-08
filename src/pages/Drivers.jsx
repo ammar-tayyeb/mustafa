@@ -28,6 +28,9 @@ import {
   getClosedSheetItems,
   deleteClosedSheet,
   saveDriverInventory,
+  getWithdrawals,
+  processWithdrawal,
+  deleteWithdrawal,
 } from "../lib/db.js";
 import { formatMoney, fromInt } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";
@@ -151,7 +154,12 @@ function calculateAveragePrices(items) {
 }
 
 export default function Drivers() {
-  const { refreshData } = useDataContext();
+  const {
+    refreshData,
+    getDriverCommission,
+    setDriverCommission: saveDriverCommissionToContext,
+    clearDriverCommission,
+  } = useDataContext();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -225,20 +233,39 @@ export default function Drivers() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!selectedDriver && rows.length > 0) {
+      const savedDriverId = typeof window !== "undefined" && localStorage.getItem("warehouse_selected_driver_id");
+      if (savedDriverId) {
+        const found = rows.find(r => String(r.id) === String(savedDriverId));
+        if (found) {
+          openSheetView(found);
+        }
+      }
+    }
+  }, [rows, selectedDriver]);
+
   // فتح تفاصيل السائق مع جميع القوائم
   async function openSheetView(driver) {
     setLoadingSheet(true);
     setSelectedDriver(driver);
+    if (typeof window !== "undefined" && window.localStorage) {
+      localStorage.setItem("warehouse_selected_driver_id", driver.id);
+    }
     setActiveSheetType("open");
-    setDriverCommission(0);
+    
+    // استرجاع نسبة العمولة المحفوظة للسائق بدلاً من تصفيرها
+    const savedComm = getDriverCommission(driver.id);
+    setDriverCommission(savedComm);
+
     setWithdrawalAmount("");
     setWithdrawalAmountInput("");
     setWithdrawalDetails("");
-    setWithdrawalEntries([]);
     try {
-      const [openItems, closed] = await Promise.all([
+      const [openItems, closed, allWithdrawals] = await Promise.all([
         getDriverSheetItems(driver.id),
         getClosedDriverSheets(driver.id),
+        getWithdrawals(),
       ]);
       const nextInventory = getInventoryItems(openItems);
       setSheetItems(processSheetItems(getSoldItems(openItems)));
@@ -247,10 +274,32 @@ export default function Drivers() {
       setInventoryNewRow({ product_name: "", basket_count: "" });
       setInventoryError("");
       setClosedSheets(closed);
+
+      // استرجاع السحوبات الحقيقية المحفوظة للسائق
+      const driverWithdrawals = allWithdrawals.filter(w =>
+        (String(w.driver_id) === String(driver.id) || (String(w.person_id) === String(driver.id) && (w.person_type === "driver" || w.withdrawer_type === "driver"))) &&
+        w.is_deleted !== 1 &&
+        (!driver.sheet_opened_at || w.date >= driver.sheet_opened_at || w.created_at >= driver.sheet_opened_at)
+      );
+      setWithdrawalEntries(driverWithdrawals.map(w => ({
+        id: w.id,
+        type: "withdrawal",
+        amount: -Number(w.amount || 0),
+        details: w.withdrawal_details || w.withdrawalDetails || "",
+        date: w.date,
+      })));
     } catch (e) {
       alert("خطأ: " + e.message);
     } finally {
       setLoadingSheet(false);
+    }
+  }
+
+  function handleCommissionChange(val) {
+    const num = val === "" ? "" : Math.min(100, Math.max(0, Number(val)));
+    setDriverCommission(num);
+    if (selectedDriver && activeSheetType === "open") {
+      saveDriverCommissionToContext(selectedDriver.id, num);
     }
   }
 
@@ -270,7 +319,7 @@ export default function Drivers() {
     );
   }
 
-  function handleAddWithdrawal() {
+  async function handleAddWithdrawal() {
     const amount = Number(withdrawalAmount);
     const remainingAmount = netAmountAfterCommission - withdrawalTotal;
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -282,37 +331,93 @@ export default function Drivers() {
       return;
     }
 
-    setWithdrawalEntries((current) => [
-      ...current,
-      {
-        id: `withdrawal-${Date.now()}-${current.length}`,
+    try {
+      await processWithdrawal({
+        amount,
+        withdrawerType: "driver",
+        personId: selectedDriver.id,
+        personName: selectedDriver.name,
+        withdrawalDetails: withdrawalDetails.trim(),
+        date: new Date().toISOString(),
+      });
+      await refreshData();
+
+      const allWithdrawals = await getWithdrawals();
+      const driverWithdrawals = allWithdrawals.filter(w =>
+        (String(w.driver_id) === String(selectedDriver.id) || (String(w.person_id) === String(selectedDriver.id) && (w.person_type === "driver" || w.withdrawer_type === "driver"))) &&
+        w.is_deleted !== 1 &&
+        (!selectedDriver.sheet_opened_at || w.date >= selectedDriver.sheet_opened_at || w.created_at >= selectedDriver.sheet_opened_at)
+      );
+      setWithdrawalEntries(driverWithdrawals.map(w => ({
+        id: w.id,
         type: "withdrawal",
-        amount: -amount,
-        details: withdrawalDetails.trim(),
-      },
-    ]);
-    setWithdrawalAmount("");
-    setWithdrawalAmountInput("");
-    setWithdrawalDetails("");
+        amount: -Number(w.amount || 0),
+        details: w.withdrawal_details || w.withdrawalDetails || "",
+        date: w.date,
+      })));
+      setWithdrawalAmount("");
+      setWithdrawalAmountInput("");
+      setWithdrawalDetails("");
+    } catch (e) {
+      alert("خطأ أثناء تسجيل السحب: " + (e?.message || e));
+    }
+  }
+
+  async function handleDeleteDriverWithdrawal(withdrawalId) {
+    try {
+      await deleteWithdrawal(withdrawalId);
+      await refreshData();
+      const allWithdrawals = await getWithdrawals();
+      const driverWithdrawals = allWithdrawals.filter(w =>
+        (String(w.driver_id) === String(selectedDriver.id) || (String(w.person_id) === String(selectedDriver.id) && (w.person_type === "driver" || w.withdrawer_type === "driver"))) &&
+        w.is_deleted !== 1 &&
+        (!selectedDriver.sheet_opened_at || w.date >= selectedDriver.sheet_opened_at || w.created_at >= selectedDriver.sheet_opened_at)
+      );
+      setWithdrawalEntries(driverWithdrawals.map(w => ({
+        id: w.id,
+        type: "withdrawal",
+        amount: -Number(w.amount || 0),
+        details: w.withdrawal_details || w.withdrawalDetails || "",
+        date: w.date,
+      })));
+    } catch (e) {
+      alert("خطأ أثناء حذف السحب: " + (e?.message || e));
+    }
   }
 
   // الانتقال للقائمة المفتوحة
   async function switchToOpenSheet() {
     setLoadingSheet(true);
     setActiveSheetType("open");
-    setDriverCommission(0);
+    const savedComm = getDriverCommission(selectedDriver.id);
+    setDriverCommission(savedComm);
     setWithdrawalAmount("");
     setWithdrawalAmountInput("");
     setWithdrawalDetails("");
-    setWithdrawalEntries([]);
     try {
-      const openItems = await getDriverSheetItems(selectedDriver.id);
+      const [openItems, allWithdrawals] = await Promise.all([
+        getDriverSheetItems(selectedDriver.id),
+        getWithdrawals(),
+      ]);
       setSheetItems(processSheetItems(getSoldItems(openItems)));
       const nextInventory = getInventoryItems(openItems);
       setInventoryItems(nextInventory);
       setInventoryDraft(toInventoryDraft(nextInventory));
       setInventoryNewRow({ product_name: "", basket_count: "" });
       setInventoryError("");
+
+      const driverWithdrawals = allWithdrawals.filter(w =>
+        (String(w.driver_id) === String(selectedDriver.id) || (String(w.person_id) === String(selectedDriver.id) && (w.person_type === "driver" || w.withdrawer_type === "driver"))) &&
+        w.is_deleted !== 1 &&
+        (!selectedDriver.sheet_opened_at || w.date >= selectedDriver.sheet_opened_at || w.created_at >= selectedDriver.sheet_opened_at)
+      );
+      setWithdrawalEntries(driverWithdrawals.map(w => ({
+        id: w.id,
+        type: "withdrawal",
+        amount: -Number(w.amount || 0),
+        details: w.withdrawal_details || w.withdrawalDetails || "",
+        date: w.date,
+      })));
     } catch (e) {
       alert("خطأ: " + e.message);
     } finally {
@@ -373,13 +478,22 @@ export default function Drivers() {
         commissionAmount,
         withdrawalAmount: withdrawalTotal,
         withdrawalDetails: withdrawalEntries.map((entry) => entry.details).filter(Boolean).join(" | "),
+        totalAmount: sheetTotal,
       });
+      clearDriverCommission(driverId);
       setConfirmDiscardSheet(null);
       await load();
+      await refreshData();
       if (selectedDriver?.id === driverId) {
-        setSelectedDriver(null);
-        setSheetItems([]);
-        setInventoryItems([]);
+        const updatedDrivers = await getDrivers();
+        const updatedCurrent = updatedDrivers.find(d => String(d.id) === String(driverId));
+        if (updatedCurrent) {
+          await openSheetView(updatedCurrent);
+        } else {
+          setSelectedDriver(null);
+          setSheetItems([]);
+          setInventoryItems([]);
+        }
       }
     } catch (e) {
       alert("خطأ: " + e.message);
@@ -759,8 +873,11 @@ export default function Drivers() {
               <button
                 onClick={() => {
                   setSelectedDriver(null);
+                  if (typeof window !== "undefined" && window.localStorage) {
+                    localStorage.removeItem("warehouse_selected_driver_id");
+                  }
                   setSheetItems([]);
-        setInventoryItems([]);
+                  setInventoryItems([]);
                   setClosedSheets([]);
                 }}
                 className="p-2 hover:bg-background rounded-lg border border-border"
@@ -935,10 +1052,7 @@ export default function Drivers() {
                       max="100"
                       step="0.01"
                       value={driverCommission}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setDriverCommission(value === "" ? "" : Math.min(100, Math.max(0, Number(value))));
-                      }}
+                      onChange={(event) => handleCommissionChange(event.target.value)}
                       className="h-8 min-w-0 rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-primary/50"
                     />
                   </div>
@@ -1100,12 +1214,7 @@ export default function Drivers() {
                       max="100"
                       step="0.01"
                       value={driverCommission}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setDriverCommission(
-                          value === "" ? "" : Math.min(100, Math.max(0, Number(value)))
-                        );
-                      }}
+                      onChange={(event) => handleCommissionChange(event.target.value)}
                       className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
                     />
                   </div>
@@ -1407,7 +1516,20 @@ export default function Drivers() {
                           ))}
                           {withdrawalEntries.map((entry) => (
                             <tr key={entry.id} className="text-red-700">
-                              <td>—</td>
+                              <td className="relative">
+                                <span>—</span>
+                                {activeSheetType === "open" && entry.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteDriverWithdrawal(entry.id)}
+                                    className="mr-1 inline-flex items-center text-destructive hover:bg-destructive/10 p-0.5 rounded print:hidden"
+                                    title="حذف هذا السحب"
+                                    aria-label="حذف هذا السحب"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </td>
                               <td className="text-right font-bold" style={{ paddingRight: "16px" }}>
                                 سحب: {entry.details || "—"}
                               </td>

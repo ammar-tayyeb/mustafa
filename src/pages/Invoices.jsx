@@ -348,7 +348,7 @@ export default function Invoices() {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const currentIndex = allFlattenedTraders.findIndex(t => t.id === selectedTrader?.id);
-        let nextIndex = 0;
+        let nextIndex;
 
         if (currentIndex === -1) {
           nextIndex = 0;
@@ -442,7 +442,9 @@ export default function Invoices() {
     setPinnedTraderIds(updated);
     try {
       localStorage.setItem("pinned_traders", JSON.stringify(updated));
-    } catch {}
+    } catch {
+      // ignore localStorage errors
+    }
   };
 
   const handleNewItemChange = (field, val) => {
@@ -938,7 +940,7 @@ export default function Invoices() {
                 </div>
                 <div>
                   <label className={labelClass}>{isRagi ? "حمالية / كيلو" : "حمالية / قطعة"}</label>
-                  <input type="text" value={newItem.porterage} onChange={(e) => handleNewItemChange('porterage', e.target.value)} className={textInputClass} placeholder={`${defaultPorterage}`} />
+                  <input type="text" value={newItem.porterage} onChange={(e) => handleNewItemChange('porterage', e.target.value)} className={textInputClass} placeholder={isRagi ? "15" : `${defaultPorterage}`} />
                 </div>
                 <div>
                   <label className={labelClass}>العمولة %</label>
@@ -975,7 +977,7 @@ export default function Invoices() {
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300">السعر</th>
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300">العمولة %</th>
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300 hidden md:table-cell">
-                          {invoiceItems.some(item => isFixedMaterial(item.product_name)) ? "حمالية" : "حمالية/قطعة"}
+                          حمالية
                         </th>
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300 bg-slate-300/50">الصافي</th>
                         <th className="py-2.5 px-1 font-extrabold text-primary border-r-2 border-slate-300 bg-primary/10">النهائي</th>

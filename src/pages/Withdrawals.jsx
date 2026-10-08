@@ -5,6 +5,7 @@ import { formatMoney } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";
 import WithdrawForm from "../components/WithdrawForm.jsx";
 import DebtSettlementDialog from "../components/DebtSettlementDialog.jsx";
+import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import { useDataContext } from "../context/DataContext.jsx";
 
 const typeLabels = {
@@ -28,13 +29,14 @@ function formatWithdrawalDateTime(dateValue) {
 }
 
 export default function Withdrawals() {
-  const { debtInvoices, settleDebtInvoice } = useDataContext();
+  const { debtInvoices, settleDebtInvoice, refreshData } = useDataContext();
   const [withdrawals, setWithdrawals] = useState([]);
   const [profits, setProfits] = useState({ totalCommissions: 0, totalWithdrawals: 0, netProfits: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [settlementInvoice, setSettlementInvoice] = useState(null);
   const [settling, setSettling] = useState(false);
+  const [deleteConfirmRow, setDeleteConfirmRow] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -64,7 +66,7 @@ export default function Withdrawals() {
     return Array.from(totals.values()).sort((a, b) => b.amount - a.amount);
   }, [withdrawals]);
 
-  async function handleDelete(row) {
+  function handleDelete(row) {
     const remaining = Math.max(
       0,
       Number(row.debt_amount || 0) - Number(row.debt_paid || 0),
@@ -73,10 +75,16 @@ export default function Withdrawals() {
       setError("لا يمكن حذف سحب غير مسدد");
       return;
     }
-    if (!window.confirm(`حذف سحب ${formatMoney(row.amount)} باسم ${row.personName}؟`)) return;
+    setDeleteConfirmRow(row);
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirmRow) return;
     try {
-      await deleteWithdrawal(row.id);
+      await deleteWithdrawal(deleteConfirmRow.id);
+      await refreshData();
       await load();
+      setDeleteConfirmRow(null);
     } catch (e) {
       setError(e?.message || "تعذر حذف السحب");
     }
@@ -169,6 +177,15 @@ export default function Withdrawals() {
         </div>
       </div>
       <DebtSettlementDialog invoice={settlementInvoice} onConfirm={handleSettlement} onClose={() => setSettlementInvoice(null)} saving={settling} />
+      <ConfirmDialog
+        open={!!deleteConfirmRow}
+        title="تأكيد حذف السحب"
+        message={deleteConfirmRow ? `حذف سحب ${formatMoney(deleteConfirmRow.amount)} باسم «${deleteConfirmRow.personName}»؟` : ""}
+        danger
+        confirmText="حذف"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmRow(null)}
+      />
     </div>
   );
 }

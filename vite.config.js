@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -10,13 +13,13 @@ export default defineConfig({
     include: ['src/**/*.test.{js,ts,jsx,tsx}'],
     exclude: ['.tsupgrader/**', 'node_modules/**'],
   },
-  // Tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    port: 3000,
     strictPort: true,
-    host: true,
+    host: '0.0.0.0',
+    allowedHosts: true,
     watch: {
-      // 3. tell vite to ignore watching `src-tauri`
+      // tell vite to ignore watching `src-tauri`
       ignored: ['**/src-tauri/**'],
     },
   },

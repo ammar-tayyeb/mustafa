@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Save, HardDrive, ShieldCheck, AlertCircle, Plus, Trash2 } from "lucide-react";
-import { getAllSettings, setSetting, isTauriRuntime } from "../lib/db.js";
+import { getAllSettings, setSetting, isTauriRuntime, ensureFallbackStore } from "../lib/db.js";
 import { DEFAULT_MATERIALS, FIXED_MATERIAL_NAME, isFixedMaterial } from "../lib/materials.js";
 
 export default function Settings() {
@@ -109,7 +109,23 @@ export default function Settings() {
 
   async function handleBackup() {
     if (!isTauriRuntime()) {
-      alert("النسخ الاحتياطي متاح فقط داخل تطبيق سطح المكتب.");
+      try {
+        const store = ensureFallbackStore();
+        const blob = new Blob([JSON.stringify(store, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        a.href = url;
+        a.download = `warehouse_backup_${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+      } catch (e) {
+        setError("فشل إنشاء نسخة احتياطية: " + (e?.message || e));
+      }
       return;
     }
 

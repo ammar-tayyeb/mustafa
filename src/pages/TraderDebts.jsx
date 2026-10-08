@@ -148,7 +148,7 @@ export default function TradersDebts() {
   };
 
   const debtPeople = useMemo(() => [
-    ...traders.map(trader => ({ ...trader, personType: "grocer", debtAmount: Number(trader.debt_fils || 0) })),
+    ...traders.filter(trader => Number(trader.debt_fils || 0) > 0).map(trader => ({ ...trader, personType: "grocer", debtAmount: Number(trader.debt_fils || 0) })),
     ...drivers
       .filter(driver => Number(driver.debt || 0) > 0)
       .map(driver => ({ ...driver, personType: "driver", debtAmount: Number(driver.debt || 0) })),
@@ -173,8 +173,8 @@ export default function TradersDebts() {
   }, [debtInvoices, selectedTrader]);
 
   const displayedInvoices = useMemo(() => [
-    ...unpaidInvoices,
-    ...selectedDebtInvoices.map(invoice => ({
+    ...unpaidInvoices.filter(invoice => Number(invoice.remaining) > 0),
+    ...selectedDebtInvoices.filter(invoice => Number(invoice.remaining) > 0).map(invoice => ({
       ...invoice,
       isWithdrawalDebt: true,
       product_summary: "سحب",
@@ -785,16 +785,20 @@ export default function TradersDebts() {
                           aria-label="تحديد قائمة دين السحب"
                           className="h-4 w-4 shrink-0 cursor-pointer accent-primary"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setExpandedDebtInvoiceId(prev => prev === invoice.id ? null : invoice.id)}
-                          className="flex flex-1 items-center justify-between gap-3 text-right"
-                        >
+                        <div className="flex flex-1 items-center justify-between gap-3 text-right">
                           <span className="text-sm text-muted-foreground">{formatInvoiceDate(invoice.date)}</span>
                           <span className="flex flex-1 items-center justify-center gap-3 text-sm font-bold">
                             <span>{formatMoney(invoice.total_final)}</span>
                             <span className="text-destructive">سحب</span>
                           </span>
+                        </div>
+                        <button
+                          type="button"
+                          title="عرض التفاصيل"
+                          aria-label={isExpanded ? "إخفاء التفاصيل" : "عرض التفاصيل"}
+                          onClick={() => setExpandedDebtInvoiceId(prev => prev === invoice.id ? null : invoice.id)}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-accent cursor-pointer"
+                        >
                           <ChevronDown size={16} className={`text-muted-foreground transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                         </button>
                       </div>

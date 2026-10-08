@@ -38,7 +38,7 @@ function persistFallbackStore(store) {
   }
 }
 
-function ensureFallbackStore() {
+export function ensureFallbackStore() {
   const store = getFallbackStore();
   store.traders ??= [];
   store.drivers ??= [];
@@ -47,8 +47,22 @@ function ensureFallbackStore() {
   store.payments ??= [];
   store.withdrawals ??= [];
   store.transactions_log ??= [];
+  store.driver_sheets ??= [];
   store.settings ??= {};
+  store.settings.market_name ??= "نظام إدارة العلوة";
+  store.settings.currency ??= "د.ع";
+  store.settings.default_commission ??= "500";
+  store.settings.basket_weight ??= "50";
+  store.settings.basket_price ??= "250";
+  store.settings.porterage ??= "250";
+  store.settings.products_list ??= "مخضر\nطماطم\nخيار\nبطاطا\nبصل\nباذنجان";
   return store;
+}
+
+export function restoreFallbackStore(newStore) {
+  if (typeof window !== "undefined" && typeof localStorage !== "undefined" && newStore) {
+    localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(newStore));
+  }
 }
 
 function getFallbackRecords(table) {
@@ -379,32 +393,36 @@ export async function openDriverSheetWithInventory(driverId, items) {
 }
 
 /** إغلاق قائمة السائق مع حفظ في جدول driver_sheets */
-export async function closeDriverSheet(driverId, { commissionRate = 0, commissionAmount = 0, withdrawalAmount = 0, withdrawalDetails = "" } = {}) {
+export async function closeDriverSheet(driverId, { commissionRate = 0, commissionAmount = 0, withdrawalAmount = 0, withdrawalDetails = "", totalAmount: passedTotalAmount = null } = {}) {
   const normalizedCommissionRate = Math.max(0, Math.min(100, Number(commissionRate) || 0));
   const normalizedCommission = Math.max(0, Math.round(Number(commissionAmount) || 0));
   const normalizedWithdrawal = Math.max(0, Math.round(Number(withdrawalAmount) || 0));
   const normalizedWithdrawalDetails = String(withdrawalDetails || "").trim() || null;
+  const ts = now();
+  const sheetId = uuid();
+
   if (!isTauriRuntime()) {
-    const driver = getFallbackRecords("drivers").find(d => d.id === driverId);
+    const driver = getFallbackRecords("drivers").find(d => String(d.id) === String(driverId));
     if (!driver) return;
     
     // حساب إجمالي القائمة المغلقة
     const sheetItems = getDriverSheetItemsSync(driverId, driver.sheet_opened_at);
-    const totalAmount = sheetItems.reduce((sum, item) => {
-      const itemAmount = roundDownToStep(item.net_weight * (item.price / 100), 250);
-      return sum + itemAmount;
-    }, 0);
+    const totalAmount = (passedTotalAmount != null && passedTotalAmount !== "")
+      ? Math.max(0, Math.round(Number(passedTotalAmount) || 0))
+      : sheetItems.reduce((sum, item) => {
+          const itemAmount = Math.round(Number(item.net_weight || item.gross_weight || 0) * Number(item.price || 0)) || Number(item.final_amount || item.amount_before || 0);
+          return sum + itemAmount;
+        }, 0);
     const debtDeducted = Math.min(Number(driver.debt || 0), totalAmount);
     
-    // حفظ في driver_sheets
-    const sheetId = uuid();
-    const ts = now();
+    // حفظ في driver_sheets بشكل دائم وثابت
     const store = ensureFallbackStore();
     store.driver_sheets = store.driver_sheets || [];
     store.driver_sheets.push({
       id: sheetId,
       driver_id: driverId,
-      sheet_opened_at: driver.sheet_opened_at,
+      driver_name: driver.name,
+      sheet_opened_at: driver.sheet_opened_at || ts,
       sheet_closed_at: ts,
       total_amount: totalAmount,
       commission_rate: normalizedCommissionRate,
@@ -412,6 +430,8 @@ export async function closeDriverSheet(driverId, { commissionRate = 0, commissio
       withdrawal_amount: normalizedWithdrawal,
       withdrawal_details: normalizedWithdrawalDetails,
       items_count: sheetItems.length,
+      is_closed: 1,
+      isClosed: true,
       notes: null,
       is_deleted: 0,
       created_at: ts,
@@ -420,30 +440,33 @@ export async function closeDriverSheet(driverId, { commissionRate = 0, commissio
     persistFallbackStore(store);
     
     // تحديث حالة السائق
-    updateFallbackRecord("drivers", driverId, row => ({ ...row, sheet_status: 'closed', debt: Math.max(0, Number(row.debt || 0) - debtDeducted), updated_at: ts }));
-    return;
+    updateFallbackRecord("drivers", driverId, row => ({
+      ...row,
+      sheet_status: 'closed',
+      debt: Math.max(0, Number(row.debt || 0) - debtDeducted),
+      updated_at: ts,
+    }));
+    return sheetId;
   }
   
   const db = await getDb();
-  const driver = await db.select("SELECT sheet_opened_at, debt FROM drivers WHERE id=?", [driverId]);
+  const driver = await db.select("SELECT name, sheet_opened_at, debt FROM drivers WHERE id=?", [driverId]);
   if (!driver[0]) return;
   
   const sheetItems = await db.select(`
-    SELECT ii.net_weight, ii.price FROM invoice_items ii
+    SELECT ii.net_weight, ii.gross_weight, ii.price, ii.final_amount, ii.amount_before FROM invoice_items ii
     WHERE ii.driver_id = ? AND ii.is_deleted = 0
-    AND ii.created_at >= ?
-  `, [driverId, driver[0].sheet_opened_at || '']);
+    AND (ii.created_at >= ? OR ? = '')
+  `, [driverId, driver[0].sheet_opened_at || '', driver[0].sheet_opened_at || '']);
   
-  const totalAmount = sheetItems.reduce((sum, item) => {
-    const itemAmount = roundDownToStep(item.net_weight * (item.price / 100), 250);
-    return sum + itemAmount;
-  }, 0);
+  const totalAmount = (passedTotalAmount != null && passedTotalAmount !== "")
+    ? Math.max(0, Math.round(Number(passedTotalAmount) || 0))
+    : sheetItems.reduce((sum, item) => {
+        const itemAmount = Math.round(Number(item.net_weight || item.gross_weight || 0) * Number(item.price || 0)) || Number(item.final_amount || item.amount_before || 0);
+        return sum + itemAmount;
+      }, 0);
   const debtDeducted = Math.min(Number(driver[0].debt || 0), totalAmount);
   
-  const ts = now();
-  const sheetId = uuid();
-  
-  // حفظ في driver_sheets
   await db.execute(`
     INSERT INTO driver_sheets (
       id, driver_id, sheet_opened_at, sheet_closed_at, total_amount,
@@ -451,13 +474,13 @@ export async function closeDriverSheet(driverId, { commissionRate = 0, commissio
       items_count, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    sheetId, driverId, driver[0].sheet_opened_at, ts, totalAmount,
+    sheetId, driverId, driver[0].sheet_opened_at || ts, ts, totalAmount,
     normalizedCommissionRate, normalizedCommission, normalizedWithdrawal, normalizedWithdrawalDetails,
     sheetItems.length, ts, ts,
   ]);
   
-  // تحديث حالة السائق
   await db.execute("UPDATE drivers SET debt=MAX(0, debt-?), sheet_status='closed', updated_at=? WHERE id=?", [debtDeducted, ts, driverId]);
+  return sheetId;
 }
 
 function roundDownToStep(value, step) {
@@ -479,19 +502,51 @@ export async function toggleDriverPaid(driverId, isPaid) {
   await db.execute("UPDATE drivers SET is_paid=?, updated_at=? WHERE id=?", [isPaid ? 1 : 0, now(), driverId]);
 }
 
-/** جلب بنود القائمة المفتوحة الحالية للسائق (منذ آخر فتح للقائمة) */
-/** جلب جميع القوائم المغلقة للسائق */
-export async function getClosedDriverSheets(driverId) {
+/** جلب جميع القوائم المغلقة للسائق أو لجميع السواق مع دعم الفلاتر */
+export async function getClosedDriverSheets(driverId = null, options = {}) {
+  const from = options?.from || null;
+  const to = options?.to || null;
   if (!isTauriRuntime()) {
+    const drivers = new Map(getFallbackRecords("drivers").map(d => [String(d.id), d]));
     return getFallbackRecords("driver_sheets")
-      .filter(sheet => sheet.driver_id === driverId && sheet.is_deleted !== 1)
-      .sort((a, b) => (b.sheet_closed_at || '').localeCompare(a.sheet_closed_at || ''));
+      .filter(sheet => sheet.is_deleted !== 1)
+      .filter(sheet => !driverId || String(sheet.driver_id) === String(driverId))
+      .filter(sheet => !from || (sheet.sheet_closed_at || sheet.created_at) >= from)
+      .filter(sheet => !to || (sheet.sheet_closed_at || sheet.created_at) <= to)
+      .map(sheet => {
+        const driver = drivers.get(String(sheet.driver_id));
+        return {
+          ...sheet,
+          driver_name: driver?.name || sheet.driver_name || "—",
+          isClosed: true,
+          is_closed: 1,
+        };
+      })
+      .sort((a, b) => (b.sheet_closed_at || b.created_at || '').localeCompare(a.sheet_closed_at || a.created_at || ''));
   }
   const db = await getDb();
-  return db.select(
-    "SELECT * FROM driver_sheets WHERE driver_id=? AND is_deleted=0 ORDER BY sheet_closed_at DESC",
-    [driverId]
-  );
+  let where = "ds.is_deleted = 0";
+  const params = [];
+  if (driverId) {
+    where += " AND ds.driver_id = ?";
+    params.push(driverId);
+  }
+  if (from) {
+    where += " AND ds.sheet_closed_at >= ?";
+    params.push(from);
+  }
+  if (to) {
+    where += " AND ds.sheet_closed_at <= ?";
+    params.push(to);
+  }
+  const rows = await db.select(`
+    SELECT ds.*, d.name as driver_name
+    FROM driver_sheets ds
+    LEFT JOIN drivers d ON ds.driver_id = d.id
+    WHERE ${where}
+    ORDER BY ds.sheet_closed_at DESC
+  `, params);
+  return rows.map(r => ({ ...r, isClosed: true, is_closed: 1 }));
 }
 
 /** جلب بنود قائمة مغلقة معينة */
@@ -499,20 +554,31 @@ export async function getClosedSheetItems(driverId, sheetOpenedAt, sheetClosedAt
   if (!isTauriRuntime()) {
     const invoices = new Map(getFallbackRecords("invoices").map(invoice => [invoice.id, invoice]));
     return getFallbackRecords("invoice_items")
-      .filter(it => it.driver_id === driverId && it.is_deleted !== 1 && it.created_at >= sheetOpenedAt && it.created_at <= sheetClosedAt)
+      .filter(it => String(it.driver_id) === String(driverId) && it.is_deleted !== 1 &&
+        (!sheetOpenedAt || it.created_at >= sheetOpenedAt) &&
+        (!sheetClosedAt || it.created_at <= sheetClosedAt))
       .map(it => ({ ...it, trader_id: invoices.get(it.invoice_id)?.trader_id ?? null }))
       .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
   }
   const db = await getDb();
+  let where = "ii.driver_id = ? AND ii.is_deleted = 0";
+  const params = [driverId];
+  if (sheetOpenedAt) {
+    where += " AND ii.created_at >= ?";
+    params.push(sheetOpenedAt);
+  }
+  if (sheetClosedAt) {
+    where += " AND ii.created_at <= ?";
+    params.push(sheetClosedAt);
+  }
   return db.select(`
     SELECT ii.*, i.date, i.trader_id, t.name as trader_name
     FROM invoice_items ii
     LEFT JOIN invoices i ON ii.invoice_id = i.id
     LEFT JOIN traders t ON i.trader_id = t.id
-    WHERE ii.driver_id = ? AND ii.is_deleted = 0
-    AND ii.created_at >= ? AND ii.created_at <= ?
+    WHERE ${where}
     ORDER BY ii.created_at DESC
-  `, [driverId, sheetOpenedAt, sheetClosedAt]);
+  `, params);
 }
 
 /** جلب بنود القائمة للسائق - تم تعديلها لتدعم القوائم المفتوحة والمغلقة للمعاينة */
@@ -991,31 +1057,6 @@ export async function transferInvoiceItemDriver(itemId, newDriverId) {
     console.warn("تعذر تحديث driver_id للفاتورة (غير حرج):", e);
   }
 }
- 
- 
-// ════════════════════════════════════════════════════════════════
-// 2) Invoices.jsx — أضف هذه الـ state مع بقية الـ states:
-// ════════════════════════════════════════════════════════════════
-// const [transferring, setTransferring] = useState(false);
- 
-// ثم استبدل handleDriverTransfer بالكامل:
-async function handleDriverTransfer(itemId, newDriverId) {
-  if (transferring) return; // يمنع الضغط المتكرر أثناء التنفيذ
-  setTransferring(true);
-  try {
-    await transferInvoiceItemDriver(itemId, newDriverId);
-    await loadData();
-    showToast("تم نقل البند وتحديث مخزون السائقين");
-  } catch (error) {
-    // أخطاء Tauri SQL تأتي أحياناً كنص وليس Error
-    const msg = error?.message || (typeof error === "string" ? error : "") || "تعذر نقل البند إلى السائق الجديد";
-    console.error("خطأ نقل السائق:", error);
-    showToast(msg);
-  } finally {
-    setTransferring(false);
-  }
-}
- 
 
 // ─── Payments ────────────────────────────────────────────────────────────────
 export async function getPayments(filters = {}) {
@@ -1062,16 +1103,22 @@ export async function getWithdrawals({ from = null, to = null } = {}) {
       .filter(row => !to || row.date <= to)
       .map(row => ({
         ...row,
+        driver_id: row.driver_id || row.person_id || null,
+        withdrawer_type: row.withdrawer_type,
         withdrawerType: row.withdrawer_type,
+        person_name: row.person_name,
         personName: row.person_name,
+        withdrawal_details: row.withdrawal_details || "",
         withdrawalDetails: row.withdrawal_details || "",
+        person_id: row.person_id || row.driver_id || null,
         personId: row.person_id || row.driver_id || null,
+        person_type: row.person_type || row.withdrawer_type,
         personType: row.person_type || row.withdrawer_type,
       }))
       .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   }
   const db = await getDb();
-  let query = "SELECT id, amount, withdrawer_type AS withdrawerType, person_name AS personName, withdrawal_details AS withdrawalDetails, date, driver_id, person_id AS personId, person_type AS personType, applied_amount, debt_amount, debt_paid, sheet_opened_at, created_at FROM withdrawals WHERE is_deleted=0";
+  let query = "SELECT id, amount, withdrawer_type, withdrawer_type AS withdrawerType, person_name, person_name AS personName, withdrawal_details, withdrawal_details AS withdrawalDetails, date, driver_id, person_id, person_id AS personId, person_type, person_type AS personType, applied_amount, debt_amount, debt_paid, sheet_opened_at, created_at FROM withdrawals WHERE is_deleted=0";
   const params = [];
   if (from) { query += " AND date(date) >= date(?)"; params.push(from); }
   if (to) { query += " AND date(date) <= date(?)"; params.push(to); }
@@ -1238,29 +1285,19 @@ export async function deleteWithdrawal(id) {
     throw new Error("لا يمكن حذف سحب غير مسدد");
   }
 
+  // حذف السحب من الجدول فقط (حذف ناعم) دون المساس بسجل الحركات أو التعديل الحسابي
   if (!isTauriRuntime()) {
     updateFallbackRecord("withdrawals", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
-    const store = ensureFallbackStore();
-    store.transactions_log = (store.transactions_log || []).map(transaction => (
-      transaction.type === "debt_withdrawal_settlement" && transaction.ref_id === id
-        ? { ...transaction, is_deleted: 1 }
-        : transaction
-    ));
-    persistFallbackStore(store);
     return;
   }
   const db = await getDb();
   await db.execute("UPDATE withdrawals SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
-  await db.execute(
-    "UPDATE transactions_log SET is_deleted=1 WHERE type='debt_withdrawal_settlement' AND ref_id=?",
-    [id]
-  );
 }
 
 export async function calculateNetProfits({ from = null, to = null } = {}) {
   const invoices = await getInvoices({ from, to, status: "posted" });
   const invoiceItems = await Promise.all(invoices.map(invoice => getInvoiceItems(invoice.id)));
-  const totalCommissions = invoiceItems.flat().reduce(
+  const totalInvoiceCommissions = invoiceItems.flat().reduce(
     (total, item) => total + Number(item.commission_value || 0), 0
   );
   const drivers = await getDrivers();
@@ -1274,14 +1311,20 @@ export async function calculateNetProfits({ from = null, to = null } = {}) {
     (total, sheet) => total + Number(sheet.commission_amount || 0), 0
   );
   const withdrawals = await getWithdrawals({ from, to });
-  const settledWithdrawalDebts = (await getTransactions({ from, to }))
-    .filter(transaction => transaction.type === "debt_withdrawal_settlement")
-    .reduce((total, transaction) => total + Number(transaction.amount || 0), 0);
-  const totalWithdrawals = withdrawals.reduce((total, row) => total + Number(row.amount || 0), 0) - settledWithdrawalDebts;
+
+  // كل سحب غير مسدد يخفض صافي أرباح المكتب.
+  // أما إذا كان السحب ديناً تم تسديده مسبقاً (debt_paid == debt_amount)،
+  // فإن أثره المتبقي على السحوبات مصفّر (0)، وحذفه من الجدول لا يُحدث أي تعديل حسابي على العمولات أو الأرباح.
+  const totalWithdrawals = withdrawals.reduce(
+    (total, row) => total + Math.max(0, Number(row.amount || 0) - Number(row.debt_paid || 0)),
+    0
+  );
+  const totalCommissions = totalInvoiceCommissions + driverCommissions;
+
   return {
-    totalCommissions: totalCommissions + driverCommissions + settledWithdrawalDebts,
+    totalCommissions,
     totalWithdrawals,
-    netProfits: totalCommissions + driverCommissions - totalWithdrawals,
+    netProfits: totalCommissions - totalWithdrawals,
   };
 }
 
