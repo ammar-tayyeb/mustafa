@@ -141,6 +141,15 @@ export default function Transactions() {
       ),
     },
     {
+      key: "driver_name",
+      label: "السائق",
+      render: (row) => (
+        <span className="text-[12px] font-semibold truncate max-w-[110px] block px-0.5">
+          {row.driver_name || "سائق غير معروف"}
+        </span>
+      ),
+    },
+    {
       key: "status",
       label: "الحالة",
       render: (row) => (

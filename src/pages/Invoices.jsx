@@ -1,7 +1,7 @@
 import { Plus, CheckCircle, PlusCircle, User, Trash2, Check, Clock, Pin, Users, Send, Printer } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
-import { getInvoices, createInvoice, updateInvoiceTotals, postInvoice, deleteInvoice, getInvoiceItems, upsertInvoiceItem, deleteInvoiceItem, getTraders, deleteTrader, getActiveDrivers, getDrivers, getAllSettings, openDriverSheet } from "../lib/db.js";
+import { getInvoices, createInvoice, updateInvoiceTotals, postInvoice, deleteInvoice, getInvoiceItems, upsertInvoiceItem, deleteInvoiceItem, getTraders, deleteTrader, getActiveDrivers, getDrivers, getAllSettings, openDriverSheet, getDriverByNumber, getDriverAvailableInventory } from "../lib/db.js";
 import { computeInvoiceItem, computeInvoiceTotals, fromInt, formatMoney } from "../lib/money.js";
 import { findOrCreateTrader, findOrCreateDriver } from "../lib/findOrCreate.js";
 import { SmallProductCombobox } from "../components/SmallProductCombobox.jsx";
@@ -98,6 +98,7 @@ export default function Invoices() {
   const [draftInvoices, setDraftInvoices] = useState([]);
   const [activeDrivers, setActiveDrivers] = useState([]);
   const [allDrivers, setAllDrivers] = useState([]);
+  const [driverInventory, setDriverInventory] = useState([]);
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -123,7 +124,7 @@ export default function Invoices() {
 
   // ترتيب حقول النموذج الجديد حسب الطلب (السائق أولاً، ثم المادة، الوزن، السعر، العدد، سعر السلة، الحمالية، العمولة)
   const [newItem, setNewItem] = useState({
-    driver_id: null, driver_label: "", product_name: "",
+    driverNumber: "", driver_id: null, driver_label: "", product_name: "",
     grossWeight: "", price: "", basketCount: "",
     basketPrice: "", porterage: "", commissionRate: "", basketWeightEach: "", manualFinal: ""
   });
@@ -135,6 +136,8 @@ export default function Invoices() {
 
   const [printInv, setPrintInv] = useState(null);
   const [printItems, setPrintItems] = useState([]);
+  const inventoryRequestRef = useRef(0);
+  const [toast, setToast] = useState(null);
 
   const defaultCommission = Number(settings.default_commission ?? 0);
   const defaultBasketWeightEach = normalizeBasketWeightEach(settings.basket_weight ?? 0);
@@ -142,15 +145,26 @@ export default function Invoices() {
   const defaultPorterage = Number(settings.porterage ?? 0) || 0;
   const marketName = settings.market_name || "مكتب الموصل";
 
-  const productItems = useMemo(() => {
-    return (settings.products_list ?? "")
-      .split("\n").map(p => p.trim()).filter(p => p.length > 0)
-      .map(name => ({ id: name, label: name }));
-  }, [settings.products_list]);
+  const driverProductItems = useMemo(() => {
+    return driverInventory
+      .filter(item => Number(item.basket_count) > 0)
+      .map(item => ({
+        id: item.product_name,
+        label: `${item.product_name} - ${item.basket_count} قطعة`,
+      }));
+  }, [driverInventory]);
 
   const activeDriverItems = useMemo(() => {
     return activeDrivers.map(d => ({ id: d.id, label: d.name }));
   }, [activeDrivers]);
+
+  async function refreshOpenDrivers() {
+    try {
+      setActiveDrivers(await getActiveDrivers());
+    } catch (error) {
+      console.error("خطأ في تحميل السائقين ذوي القوائم المفتوحة:", error);
+    }
+  }
 
   const loadData = useCallback(async () => {
     try {
@@ -184,6 +198,28 @@ export default function Invoices() {
   }, [selectedTrader]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const refreshDriverInventory = useCallback(async (driverId) => {
+    const requestId = ++inventoryRequestRef.current;
+    if (!driverId) {
+      setDriverInventory([]);
+      return;
+    }
+    try {
+      const inventory = await getDriverAvailableInventory(driverId);
+      if (requestId !== inventoryRequestRef.current) return;
+      setDriverInventory(inventory);
+    } catch (error) {
+      if (requestId !== inventoryRequestRef.current) return;
+      console.error("خطأ في تحميل مخزون السائق:", error);
+      setDriverInventory([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    setNewItem(prev => ({ ...prev, product_name: "" }));
+    refreshDriverInventory(newItem.driver_id);
+  }, [newItem.driver_id, refreshDriverInventory]);
 
   useEffect(() => {
     if (currentInvoice) {
@@ -330,17 +366,32 @@ export default function Invoices() {
     setNewItem({ ...newItem, [field]: formatNumberWithCommas(val.replace(/[^0-9.]/g,"")) });
   };
 
+  function showToast(message) {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 3500);
+  }
+
+  const handleDriverNumberChange = useCallback(async (val) => {
+    const numStr = val.replace(/[^0-9]/g, "");
+    setNewItem(prev => ({ ...prev, driverNumber: numStr, driver_id: null, driver_label: "" }));
+    if (!numStr) return;
+    const driver = await getDriverByNumber(numStr);
+    if (driver) {
+      setNewItem(prev => ({
+        ...prev,
+        driverNumber: numStr,
+        driver_id: driver.id,
+        driver_label: driver.name,
+      }));
+    }
+  }, []);
+
   async function handleAddNewItem(e) {
     e.preventDefault();
     if (!selectedTrader) return alert("الرجاء اختيار بگال أولاً");
     if (!newItem.product_name) return alert("اسم المادة مطلوب");
 
     try {
-      let invId = currentInvoice?.id;
-      if (!invId) {
-        invId = await createInvoice({ trader_id: selectedTrader.id, driver_id: null, date: getLocalDateTimeString(), notes: null });
-      }
-
       let dId = newItem.driver_id;
       if (!dId && newItem.driver_label?.trim()) {
         const trimmed = newItem.driver_label.trim();
@@ -349,9 +400,23 @@ export default function Invoices() {
         else { dId = await findOrCreateDriver(trimmed); }
       }
 
+      if (!dId) return showToast("الرجاء اختيار سائق لديه قائمة مفتوحة أولاً");
+
       const cleanGross = cleanCommas(newItem.grossWeight);
       const cleanPrice = cleanCommas(newItem.price);
       const cleanBasketCount = cleanCommas(newItem.basketCount);
+      if (cleanBasketCount <= 0) return showToast("أدخل كمية بيع أكبر من صفر");
+      const latestInventory = await getDriverAvailableInventory(dId);
+      const availableItem = latestInventory.find(item => item.product_name === newItem.product_name);
+      if (!availableItem) return showToast("عدد القطع المتبقية أقل من الكمية المطلوبة");
+      if (cleanBasketCount > Number(availableItem.basket_count)) {
+        return showToast("عدد القطع المتبقية أقل من الكمية المطلوبة");
+      }
+
+      let invId = currentInvoice?.id;
+      if (!invId) {
+        invId = await createInvoice({ trader_id: selectedTrader.id, driver_id: null, date: getLocalDateTimeString(), notes: null });
+      }
       const cleanBasketWt = defaultBasketWeightEach;
       const cleanCommRate = newItem.commissionRate !== "" ? cleanCommas(newItem.commissionRate) : (defaultCommission / 100);
       const cleanPortVal = newItem.porterage !== "" ? cleanCommas(newItem.porterage) : defaultPorterage;
@@ -378,8 +443,9 @@ export default function Invoices() {
 
       await updateInvoiceTotals(invId, currentTotals);
 
-      setNewItem({ ...newItem, grossWeight: "", basketCount: "", price: "", basketPrice: "", porterage: "", commissionRate: "", manualFinal: "" });
+      setNewItem({ ...newItem, driverNumber: "", grossWeight: "", basketCount: "", price: "", basketPrice: "", porterage: "", commissionRate: "", manualFinal: "" });
       await loadData();
+      await refreshDriverInventory(dId);
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء الإضافة");
@@ -391,6 +457,17 @@ export default function Invoices() {
     try {
       const itemToUpdate = invoiceItems.find(it => it.id === itemId);
       if (!itemToUpdate) return;
+
+      if (field === "basket_count") {
+        const requestedCount = cleanCommas(newFormattedValue);
+        const availableInventory = await getDriverAvailableInventory(itemToUpdate.driver_id);
+        const availableItem = availableInventory.find(item => item.product_name === itemToUpdate.product_name);
+        const allowedCount = Number(availableItem?.basket_count || 0) + Number(itemToUpdate.basket_count || 0);
+        if (requestedCount <= 0 || requestedCount > allowedCount) {
+          showToast("عدد القطع المتبقية أقل من الكمية المطلوبة");
+          return;
+        }
+      }
 
       const overrides = {
         grossWeight: field === 'gross_weight' ? cleanCommas(newFormattedValue) : fromInt(itemToUpdate.gross_weight),
@@ -422,6 +499,7 @@ export default function Invoices() {
 
       await updateInvoiceTotals(currentInvoice.id, totals);
       await loadData();
+      await refreshDriverInventory(itemToUpdate.driver_id);
     } catch (e) {
       alert("خطأ في تحديث البند");
     }
@@ -730,19 +808,52 @@ export default function Invoices() {
               </button>
             </div>
 
-            {/* نموذج الإضافة بالترتيب المطلوب: السائق أولاً، ثم المادة، الوزن الكلي، السعر، العدد، سعر السلة، الحمالية، العمولة */}
+            {/* الصف الأول: رقم السائق | اسم السائق | اسم المادة */}
+            {/* الصف الثاني: بقية الحقول الرقمية + زر الإضافة */}
             <form onSubmit={handleAddNewItem} className="flex flex-col gap-2">
 
-              {/* الصف الأول: السائق، اسم المادة، الوزن الكلي، السعر، العدد */}
-              <div className="grid grid-cols-5 gap-2 items-end">
-                <div>
-                  <label className={labelClass}>السائق</label>
-                  <SmallProductCombobox items={activeDriverItems} value={newItem.driver_id || ""} onChange={(id, label) => setNewItem({ ...newItem, driver_id: id, driver_label: label })} placeholder="اختر السائق..." />
+              {/* الصف الأول */}
+              <div className="grid grid-cols-8 gap-2 items-end">
+                <div className="col-span-1">
+                  <label className={labelClass}># رقم السائق</label>
+                  <input
+                    type="text"
+                    value={newItem.driverNumber}
+                    onChange={(e) => handleDriverNumberChange(e.target.value)}
+                    className={`${textInputClass} text-center font-extrabold text-primary placeholder:text-slate-400`}
+                    placeholder="٠"
+                    maxLength={4}
+                  />
                 </div>
-                <div>
+                <div className="col-span-3">
+                  <label className={labelClass}>
+                    السائق
+                    {newItem.driver_id && <span className="mr-1 text-emerald-600 font-bold">✓</span>}
+                  </label>
+                  <SmallProductCombobox
+                    items={activeDriverItems}
+                    value={newItem.driver_label || ""}
+                    onChange={(id, label) => {
+                      const driver = allDrivers.find(d => String(d.id) === String(id));
+                      setNewItem(prev => ({ ...prev, driver_id: id, driver_label: label, driverNumber: driver?.driver_number?.toString() || prev.driverNumber }));
+                    }}
+                    onFocus={refreshOpenDrivers}
+                    placeholder="اختر السائق..."
+                  />
+                </div>
+                <div className="col-span-4">
                   <label className={labelClass}>اسم المادة *</label>
-                  <SmallProductCombobox items={productItems} value={newItem.product_name} onChange={(id, label) => setNewItem({ ...newItem, product_name: label })} placeholder="بحث المادة..." />
+                  <SmallProductCombobox
+                    items={driverProductItems}
+                    value={newItem.product_name}
+                    onChange={(id) => setNewItem(prev => ({ ...prev, product_name: id }))}
+                    placeholder={newItem.driver_id ? "بحث مادة السائق..." : "اختر السائق أولاً..."}
+                  />
                 </div>
+              </div>
+
+              {/* الصف الثاني */}
+              <div className="grid grid-cols-8 gap-2 items-end pt-1">
                 <div>
                   <label className={labelClass}>الوزن الكلي</label>
                   <input type="text" value={newItem.grossWeight} onChange={(e) => handleNewItemChange('grossWeight', e.target.value)} className={textInputClass} placeholder="0" />
@@ -755,10 +866,6 @@ export default function Invoices() {
                   <label className={labelClass}>العدد</label>
                   <input type="text" value={newItem.basketCount} onChange={(e) => handleNewItemChange('basketCount', e.target.value)} className={textInputClass} placeholder="0" />
                 </div>
-              </div>
-
-              {/* الصف الثاني: سعر السلة، الحمالية/سلة، العمولة %، نهائي يدوي، زر الإضافة */}
-              <div className="grid grid-cols-5 gap-2 items-end pt-1">
                 <div>
                   <label className={labelClass}>سعر السلة</label>
                   <input type="text" value={newItem.basketPrice} onChange={(e) => handleNewItemChange('basketPrice', e.target.value)} className={textInputClass} placeholder={`${defaultBasketPrice}`} />
@@ -777,7 +884,7 @@ export default function Invoices() {
                 </div>
                 <div>
                   <button type="submit" disabled={!selectedTrader || !newItem.product_name} className="w-full h-7 rounded bg-primary text-primary-foreground text-[11px] font-extrabold hover:bg-primary/90 disabled:opacity-50 shadow transition-colors">
-                    إضافة البند
+                    إضافة
                   </button>
                 </div>
               </div>
@@ -1028,6 +1135,12 @@ export default function Invoices() {
               </span>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-5 left-5 z-[70] rounded-md bg-destructive px-4 py-3 text-sm font-semibold text-destructive-foreground shadow-lg">
+          {toast}
         </div>
       )}
 

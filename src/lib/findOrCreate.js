@@ -61,7 +61,8 @@ export async function findOrCreateDriver(name) {
     } else {
       const store = getFallbackStore(); id = uuid(); const ts = now();
       store.drivers = store.drivers || [];
-      store.drivers.push({ id, name: normalized, phone: null, vehicle_plate: null, notes: null, sheet_status: 'closed', sheet_opened_at: null, is_paid: 0, is_deleted: 0, created_at: ts, updated_at: ts });
+      const maxNum = store.drivers.reduce((max, d) => Math.max(max, d.driver_number || 0), 0);
+      store.drivers.push({ id, name: normalized, phone: null, vehicle_plate: null, notes: null, driver_number: maxNum + 1, sheet_status: 'closed', sheet_opened_at: null, is_paid: 0, is_deleted: 0, created_at: ts, updated_at: ts });
       saveFallbackStore(store);
     }
     await openDriverSheet(id); // فتح القائمة (لا يعيد التعيين إذا كانت مفتوحة)
@@ -76,10 +77,12 @@ export async function findOrCreateDriver(name) {
   } else {
     id = uuid(); const ts = now();
     const { hasColumn } = await import("./db.js");
+    const numRows = await db.select("SELECT COALESCE(MAX(driver_number), 0) + 1 as next_num FROM drivers");
+    const driverNumber = numRows[0]?.next_num || 1;
     if (await hasColumn("drivers", "vehicle_plate")) {
-      await db.execute("INSERT INTO drivers (id, name, vehicle_plate, sheet_status, is_paid, created_at, updated_at) VALUES (?, ?, NULL, 'closed', 0, ?, ?)", [id, normalized, ts, ts]);
+      await db.execute("INSERT INTO drivers (id, name, vehicle_plate, driver_number, sheet_status, is_paid, created_at, updated_at) VALUES (?, ?, NULL, ?, 'closed', 0, ?, ?)", [id, normalized, driverNumber, ts, ts]);
     } else {
-      await db.execute("INSERT INTO drivers (id, name, sheet_status, is_paid, created_at, updated_at) VALUES (?, ?, 'closed', 0, ?, ?)", [id, normalized, ts, ts]);
+      await db.execute("INSERT INTO drivers (id, name, driver_number, sheet_status, is_paid, created_at, updated_at) VALUES (?, ?, ?, 'closed', 0, ?, ?)", [id, normalized, driverNumber, ts, ts]);
     }
   }
   await openDriverSheet(id); // فتح القائمة (لا يعيد التعيين إذا كانت مفتوحة)

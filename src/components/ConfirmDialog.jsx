@@ -11,7 +11,7 @@ import { AlertTriangle } from "lucide-react";
  *   onConfirm   — () => void
  *   onCancel    — () => void
  */
-export default function ConfirmDialog({ open, title = "تأكيد", message, confirmText = "تأكيد", danger = false, onConfirm, onCancel }) {
+export default function ConfirmDialog({ open, title = "تأكيد", message, confirmText = "تأكيد", cancelText = "إلغاء", danger = false, onConfirm, onCancel }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -29,7 +29,7 @@ export default function ConfirmDialog({ open, title = "تأكيد", message, con
             onClick={onCancel}
             className="px-4 py-2 rounded-md border border-border text-sm hover:bg-accent"
           >
-            إلغاء
+            {cancelText}
           </button>
           <button
             type="button"

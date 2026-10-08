@@ -13,6 +13,7 @@ export function SmallProductCombobox({
   items = [],
   value = "",
   onChange = () => {},
+  onFocus = () => {},
   placeholder = "ابحث أو اختر...",
 }) {
   const [open, setOpen] = useState(false);
@@ -104,7 +105,10 @@ export function SmallProductCombobox({
             setOpen(true);
             setSelectedIndex(-1);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            setOpen(true);
+            onFocus();
+          }}
           onKeyDown={handleKeyDown}
           placeholder={value ? value : placeholder}
           className="w-full rounded border border-input bg-background px-7 py-0.5 text-[11px] h-6 outline-none focus:ring-1 focus:ring-ring text-right pr-6"

@@ -18,7 +18,9 @@ import {
   updateDriver,
   deleteDriver,
   getDriverSheetItems,
-  openDriverSheet,
+  openDriverSheetWithInventory,
+  discardDriverSheetInventory,
+  getDriverAvailableInventory,
   closeDriverSheet,
   toggleDriverPaid,
   getAllSettings,
@@ -29,6 +31,7 @@ import {
 import { formatMoney, fromInt } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import { SmallProductCombobox } from "../components/SmallProductCombobox.jsx";
 
 const EMPTY = { name: "", phone: "", vehicle_plate: "", notes: "" };
 
@@ -68,6 +71,41 @@ function processSheetItems(items) {
   return Array.from(mergedMap.values()).sort((a, b) => b.price - a.price);
 }
 
+function getSoldItems(items) {
+  return (items || []).filter(
+    item => item.trader_id != null && item.trader_id !== ""
+  );
+}
+
+function calculateAveragePrices(items) {
+  const totals = new Map();
+
+  for (const item of items || []) {
+    const productName = item.product_name?.trim();
+    if (!productName) continue;
+
+    const current = totals.get(productName) || {
+      product_name: productName,
+      total_amount: 0,
+      total_weight: 0,
+      total_quantity: 0,
+    };
+    current.total_amount += Number(item.simple_amount || 0);
+    current.total_weight += Number(item.net_weight || 0);
+    current.total_quantity += Number(item.basket_count || 0);
+    totals.set(productName, current);
+  }
+
+  return Array.from(totals.values()).map(item => {
+    const divisor = item.total_weight || item.total_quantity;
+    return {
+      ...item,
+      divisor,
+      average_price: divisor ? item.total_amount / divisor : 0,
+    };
+  });
+}
+
 export default function Drivers() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +114,8 @@ export default function Drivers() {
   const [editRow, setEditRow] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY);
+  const [addSaving, setAddSaving] = useState(false);
   const [deleteRow, setDeleteRow] = useState(null);
   const [settings, setSettings] = useState({});
 
@@ -84,15 +124,30 @@ export default function Drivers() {
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [activeSheetType, setActiveSheetType] = useState("open");
   const [sheetItems, setSheetItems] = useState([]);
+  const [showAveragePrice, setShowAveragePrice] = useState(false);
   const [closedSheets, setClosedSheets] = useState([]);
   const [loadingSheet, setLoadingSheet] = useState(false);
 
   // Dialogs
   const [confirmDeleteSheet, setConfirmDeleteSheet] = useState(null);
   const [confirmTogglePaid, setConfirmTogglePaid] = useState(null);
+  const [confirmDiscardSheet, setConfirmDiscardSheet] = useState(null);
+  const [openingDriver, setOpeningDriver] = useState(null);
+  const [inventoryRows, setInventoryRows] = useState([
+    { product_name: "", basket_count: "" },
+  ]);
+  const [openingSaving, setOpeningSaving] = useState(false);
 
   const printRef = useRef();
   const marketName = settings.market_name || "مكتب نينوى";
+  const productItems = useMemo(
+    () => (settings.products_list || "")
+      .split("\n")
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .map((name) => ({ id: name, label: name })),
+    [settings.products_list]
+  );
 
   const load = useCallback(async () => {
     try {
@@ -125,7 +180,7 @@ export default function Drivers() {
         getDriverSheetItems(driver.id),
         getClosedDriverSheets(driver.id),
       ]);
-      setSheetItems(processSheetItems(openItems));
+      setSheetItems(processSheetItems(getSoldItems(openItems)));
       setClosedSheets(closed);
     } catch (e) {
       alert("خطأ: " + e.message);
@@ -140,7 +195,7 @@ export default function Drivers() {
     setActiveSheetType("open");
     try {
       const openItems = await getDriverSheetItems(selectedDriver.id);
-      setSheetItems(processSheetItems(openItems));
+      setSheetItems(processSheetItems(getSoldItems(openItems)));
     } catch (e) {
       alert("خطأ: " + e.message);
     } finally {
@@ -158,7 +213,7 @@ export default function Drivers() {
         closedSheet.sheet_opened_at,
         closedSheet.sheet_closed_at
       );
-      setSheetItems(processSheetItems(items));
+      setSheetItems(processSheetItems(getSoldItems(items)));
     } catch (e) {
       alert("خطأ: " + e.message);
     } finally {
@@ -167,9 +222,23 @@ export default function Drivers() {
   }
 
   async function handleCloseSheet(driverId) {
-    if (!window.confirm("إغلاق القائمة؟")) return;
     try {
+      const remaining = await getDriverAvailableInventory(driverId);
+      if (remaining.length > 0) {
+        setConfirmDiscardSheet({ driverId });
+        return;
+      }
+      await finishCloseSheet(driverId, false);
+    } catch (e) {
+      alert("خطأ: " + e.message);
+    }
+  }
+
+  async function finishCloseSheet(driverId, discardRemaining) {
+    try {
+      if (discardRemaining) await discardDriverSheetInventory(driverId);
       await closeDriverSheet(driverId);
+      setConfirmDiscardSheet(null);
       await load();
       if (selectedDriver?.id === driverId) {
         setSelectedDriver(null);
@@ -211,12 +280,32 @@ export default function Drivers() {
     }
   }
 
-  async function handleReopenSheet(driverId) {
+  function beginOpenSheet(driver) {
+    setOpeningDriver(driver);
+    setInventoryRows([{ product_name: "", basket_count: "" }]);
+  }
+
+  async function handleOpenSheet(event) {
+    event.preventDefault();
+    if (!openingDriver) return;
+
+    const validRows = inventoryRows.filter(
+      row => row.product_name && Number(row.basket_count) > 0
+    );
+    if (!validRows.length) {
+      alert("أدخل مادة واحدة على الأقل مع عدد السلات");
+      return;
+    }
+
+    setOpeningSaving(true);
     try {
-      await openDriverSheet(driverId);
+      await openDriverSheetWithInventory(openingDriver.id, validRows);
+      setOpeningDriver(null);
       await load();
     } catch (e) {
       alert("خطأ: " + e.message);
+    } finally {
+      setOpeningSaving(false);
     }
   }
 
@@ -254,6 +343,8 @@ export default function Drivers() {
     .alwa-table { width: 100%; border-collapse: collapse; border: 1px solid #3B82F6; margin-top: 8px; border-radius: 8px; }
     .alwa-table th { border: 1px solid #3B82F6!important; padding: 8px 4px; background: #f8fafc; text-align: center; font-weight: bold; }
     .alwa-table td { border: 1px solid #3B82F6!important; height: 38px; text-align: center; font-size: 14px; color: #000; font-weight: bold; border-radius: 8px; }
+    .average-row td { background: #eff6ff!important; color: #1e3a8a!important; border-top: 2px solid #2563eb!important; font-weight: 900!important; }
+    .average-row .average-label { text-align: right; padding-right: 16px; }
     
     .pill-green { border: 1px solid #16a34a; color: #16a34a; background: #f0fdf4; border-radius: 9999px; padding: 2px 16px; font-size: 12px; font-weight: bold; display: inline-block; }
     .pill-orange { border: 1px solid #ea580c; color: #ea580c; background: #fff7ed; border-radius: 9999px; padding: 2px 16px; font-size: 12px; font-weight: bold; display: inline-block; }
@@ -304,9 +395,13 @@ export default function Drivers() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      if (editRow) await updateDriver(editRow.id, form);
-      else await createDriver(form);
-      setShowForm(false);
+      if (editRow) {
+        await updateDriver(editRow.id, form);
+        setShowForm(false);
+      } else {
+        await createDriver(form);
+        setForm(EMPTY);
+      }
       await load();
     } catch (e) {
       alert("خطأ: " + e.message);
@@ -315,10 +410,19 @@ export default function Drivers() {
     }
   }
 
-  function openAdd() {
-    setEditRow(null);
-    setForm(EMPTY);
-    setShowForm(true);
+  async function handleQuickAdd(e) {
+    e.preventDefault();
+    if (!addForm.name.trim()) return;
+    setAddSaving(true);
+    try {
+      await createDriver(addForm);
+      setAddForm(EMPTY);
+      await load();
+    } catch (e) {
+      alert("خطأ: " + e.message);
+    } finally {
+      setAddSaving(false);
+    }
   }
 
   function openEdit(row) {
@@ -345,6 +449,10 @@ export default function Drivers() {
   }, [rows, searchText]);
 
   const sheetTotal = sheetItems.reduce((s, it) => s + (it.simple_amount || 0), 0);
+  const averagePrices = useMemo(
+    () => calculateAveragePrices(sheetItems),
+    [sheetItems]
+  );
 
   // ─── التقسيم العمودي: اليمين (القائمة)، اليسار (التفاصيل) ───
   return (
@@ -356,13 +464,64 @@ export default function Drivers() {
             إدارة السائقين والقوائم المفتوحة والمغلقة
           </p>
         </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"
-        >
-          <Plus size={16} /> إضافة سائق
-        </button>
       </div>
+
+      {!selectedDriver && (
+        <section className="bg-card border border-border rounded-lg p-4 shadow-sm">
+          <div className="mb-3">
+            <h3 className="text-sm font-semibold">إضافة سائق جديد</h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              أضف السائق بسرعة، وسيظهر مباشرة في القائمة أدناه.
+            </p>
+          </div>
+          <form onSubmit={handleQuickAdd} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">الاسم *</label>
+              <input
+                required
+                value={addForm.name}
+                onChange={(e) => setAddForm((current) => ({ ...current, name: e.target.value }))}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="اسم السائق"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">الهاتف</label>
+              <input
+                type="tel"
+                value={addForm.phone}
+                onChange={(e) => setAddForm((current) => ({ ...current, phone: e.target.value }))}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="رقم الهاتف"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">المركبة / اللوحة</label>
+              <input
+                value={addForm.vehicle_plate}
+                onChange={(e) => setAddForm((current) => ({ ...current, vehicle_plate: e.target.value }))}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="رقم اللوحة"
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <input
+                value={addForm.notes}
+                onChange={(e) => setAddForm((current) => ({ ...current, notes: e.target.value }))}
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="ملاحظات"
+              />
+              <button
+                type="submit"
+                disabled={addSaving}
+                className="shrink-0 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {addSaving ? "جارٍ..." : "إضافة"}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       {error && (
         <div className="rounded-md bg-destructive/10 text-destructive px-4 py-3 text-sm">
@@ -390,15 +549,22 @@ export default function Drivers() {
               >
                 <ArrowRight size={18} />
               </button>
-              <div>
-                <h2 className="text-lg font-bold">
-                  {activeSheetType === "open" ? "القائمة المفتوحة" : "قائمة مغلقة"}
-                  {": "}
-                  <span className="text-primary">{selectedDriver.name}</span>
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  المركبة: {selectedDriver.vehicle_plate || "—"}
-                </p>
+              <div className="flex items-center gap-3">
+                {selectedDriver.driver_number && (
+                  <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 text-primary font-extrabold text-lg border-2 border-primary/20 shrink-0">
+                    {selectedDriver.driver_number}
+                  </span>
+                )}
+                <div>
+                  <h2 className="text-lg font-bold">
+                    {activeSheetType === "open" ? "القائمة المفتوحة" : "قائمة مغلقة"}
+                    {": "}
+                    <span className="text-primary">{selectedDriver.name}</span>
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    المركبة: {selectedDriver.vehicle_plate || "—"}
+                  </p>
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -429,25 +595,61 @@ export default function Drivers() {
                 </>
               ) : (
                 // قائمة مغلقة
+                <>
+                  {selectedDriver.sheet_status !== "open" && activeSheetType === "open" && (
+                    <button
+                      onClick={() => beginOpenSheet(selectedDriver)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+                    >
+                      <Plus size={15} /> فتح قائمة
+                    </button>
+                  )}
+                  <button
+                    onClick={() =>
+                      handleTogglePaid(
+                        { ...selectedDriver, id: selectedDriver.id },
+                        activeSheetType
+                      )
+                    }
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                      selectedDriver.is_paid
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                        : "bg-background text-muted-foreground border-border"
+                    }`}
+                  >
+                    {selectedDriver.is_paid ? (
+                      <CheckCircle2 size={15} />
+                    ) : (
+                      <Circle size={15} />
+                    )}
+                    {selectedDriver.is_paid ? "واصل ✓" : "غير واصل"}
+                  </button>
+                </>
+              )}
+              {sheetItems.length > 0 && (
                 <button
-                  onClick={() =>
-                    handleTogglePaid(
-                      { ...selectedDriver, id: selectedDriver.id },
-                      activeSheetType
-                    )
-                  }
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border transition-colors ${
-                    selectedDriver.is_paid
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                      : "bg-background text-muted-foreground border-border"
+                  type="button"
+                  role="switch"
+                  aria-checked={showAveragePrice}
+                  onClick={() => setShowAveragePrice((current) => !current)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    showAveragePrice
+                      ? "bg-primary/10 text-primary border-primary/30"
+                      : "bg-background text-muted-foreground border-border hover:bg-accent"
                   }`}
                 >
-                  {selectedDriver.is_paid ? (
-                    <CheckCircle2 size={15} />
-                  ) : (
-                    <Circle size={15} />
-                  )}
-                  {selectedDriver.is_paid ? "واصل ✓" : "غير واصل"}
+                  <span
+                    className={`relative inline-flex h-4 w-7 rounded-full transition-colors ${
+                      showAveragePrice ? "bg-primary" : "bg-muted-foreground/40"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
+                        showAveragePrice ? "translate-x-3.5" : "translate-x-0.5"
+                      }`}
+                    />
+                  </span>
+                  عرض السعر المتوسط
                 </button>
               )}
               {sheetItems.length > 0 && (
@@ -676,6 +878,23 @@ export default function Drivers() {
                               <td></td>
                             </tr>
                           ))}
+
+                          {showAveragePrice && averagePrices.map((item) => (
+                            <tr className="average-row" key={`average-row-${item.product_name}`}>
+                              <td>—</td>
+                              <td className="average-label">
+                                متوسط السعر: {item.product_name}
+                              </td>
+                              <td>{item.total_quantity || "—"}</td>
+                              <td>{fromInt(item.total_weight).toLocaleString("en-US") || "—"}</td>
+                              <td>
+                                {item.average_price.toLocaleString("en-US", {
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td>{item.total_amount.toLocaleString("en-US")}</td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
 
@@ -720,18 +939,25 @@ export default function Drivers() {
                 onClick={() => openSheetView(driver)}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1">
-                    <h3 className="font-bold text-sm">{driver.name}</h3>
-                    {driver.phone && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        📱 {driver.phone}
-                      </p>
+                  <div className="flex-1 flex items-start gap-2">
+                    {driver.driver_number && (
+                      <span className="shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary font-extrabold text-sm border border-primary/20">
+                        {driver.driver_number}
+                      </span>
                     )}
-                    {driver.vehicle_plate && (
-                      <p className="text-xs text-muted-foreground">
-                        🚗 {driver.vehicle_plate}
-                      </p>
-                    )}
+                    <div className="flex-1">
+                      <h3 className="font-bold text-sm">{driver.name}</h3>
+                      {driver.phone && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          📱 {driver.phone}
+                        </p>
+                      )}
+                      {driver.vehicle_plate && (
+                        <p className="text-xs text-muted-foreground">
+                          🚗 {driver.vehicle_plate}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1 items-end">
                     <span
@@ -789,11 +1015,11 @@ export default function Drivers() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleReopenSheet(driver.id);
+                        beginOpenSheet(driver);
                       }}
                       className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold px-2 py-1.5 rounded border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 transition-colors"
                     >
-                      + قائمة جديدة
+                      فتح قائمة
                     </button>
                   )}
                   <button
@@ -824,6 +1050,87 @@ export default function Drivers() {
               لا يوجد سائقون مسجّلون
             </div>
           )}
+        </div>
+      )}
+
+      {openingDriver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-background rounded-lg shadow-xl border border-border w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <h3 className="font-semibold">فتح قائمة للسائق</h3>
+                <p className="text-xs text-muted-foreground mt-1">{openingDriver.name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpeningDriver(null)}
+                className="p-1 rounded hover:bg-accent"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleOpenSheet} className="p-5 flex flex-col gap-3">
+              <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-xs text-muted-foreground">
+                أدخل المواد التي أحضرها السائق. العدد هنا يعني عدد السلات، وسيُحفظ ككمية متاحة في هذه القائمة.
+              </div>
+              <div className="grid grid-cols-[1fr_130px_32px] gap-2 text-xs font-semibold text-muted-foreground">
+                <span>المادة</span>
+                <span>السلات المتاحة</span>
+                <span />
+              </div>
+              {inventoryRows.map((row, index) => (
+                <div key={index} className="grid grid-cols-[1fr_130px_32px] gap-2 items-center">
+                  <SmallProductCombobox
+                    items={productItems}
+                    value={row.product_name}
+                    onChange={(_, label) => setInventoryRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_name: label } : item))}
+                    placeholder="اختر المادة..."
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={row.basket_count}
+                    onChange={(event) => setInventoryRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, basket_count: event.target.value } : item))}
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                    placeholder="0"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setInventoryRows((current) => current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index))}
+                    className="p-2 rounded hover:bg-accent text-destructive disabled:opacity-40"
+                    disabled={inventoryRows.length === 1}
+                    title="حذف المادة"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setInventoryRows((current) => [...current, { product_name: "", basket_count: "" }])}
+                className="self-start text-xs font-semibold text-primary hover:underline"
+              >
+                + إضافة مادة أخرى
+              </button>
+              <div className="flex gap-2 justify-end pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setOpeningDriver(null)}
+                  className="px-4 py-2 rounded-md border border-border text-sm hover:bg-accent"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={openingSaving}
+                  className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {openingSaving ? "جارٍ الحفظ..." : "حفظ وفتح القائمة"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -931,6 +1238,17 @@ export default function Drivers() {
         confirmText="نعم، غير الحالة"
         onConfirm={executeTogglePaid}
         onCancel={() => setConfirmTogglePaid(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmDiscardSheet}
+        title="إغلاق قائمة السائق"
+        message="هل تريد حذف الكميات المتبقية واعتبارها تالفة؟"
+        confirmText="نعم"
+        cancelText="لا"
+        danger
+        onConfirm={() => finishCloseSheet(confirmDiscardSheet.driverId, true)}
+        onCancel={() => setConfirmDiscardSheet(null)}
       />
 
       <ConfirmDialog
