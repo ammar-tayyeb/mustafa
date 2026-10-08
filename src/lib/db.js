@@ -1,3 +1,5 @@
+import { isFixedMaterial } from "./materials.js";
+
 let _db = null;
 const _tableColumnCache = new Map();
 let _schemaEnsured = false;
@@ -13,18 +15,18 @@ function cloneData(value) { return JSON.parse(JSON.stringify(value)); }
 
 function getFallbackStore() {
   if (typeof window === "undefined" || typeof localStorage === "undefined") {
-    return { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+    return { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], withdrawals: [], transactions_log: [], settings: {} };
   }
   try {
     const raw = localStorage.getItem(FALLBACK_STORE_KEY);
     if (!raw) {
-      const initial = { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+      const initial = { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], withdrawals: [], transactions_log: [], settings: {} };
       localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(initial));
       return initial;
     }
     return JSON.parse(raw);
   } catch (error) {
-    const initial = { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], transactions_log: [], settings: {} };
+    const initial = { traders: [], drivers: [], invoices: [], invoice_items: [], payments: [], withdrawals: [], transactions_log: [], settings: {} };
     localStorage.setItem(FALLBACK_STORE_KEY, JSON.stringify(initial));
     return initial;
   }
@@ -43,6 +45,7 @@ function ensureFallbackStore() {
   store.invoices ??= [];
   store.invoice_items ??= [];
   store.payments ??= [];
+  store.withdrawals ??= [];
   store.transactions_log ??= [];
   store.settings ??= {};
   return store;
@@ -82,18 +85,10 @@ function pushFallbackRecord(table, row) {
   return cloneData(row);
 }
 
-function ensureFallbackDriverNumbers() {
-  const store = ensureFallbackStore();
-  const drivers = store.drivers || [];
-  let maxNum = drivers.reduce((max, d) => Math.max(max, d.driver_number || 0), 0);
-  let changed = false;
-  for (const d of drivers) {
-    if (d.is_deleted !== 1 && !d.driver_number) {
-      d.driver_number = ++maxNum;
-      changed = true;
-    }
-  }
-  if (changed) persistFallbackStore(store);
+function normalizeDriverNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export function isTauriRuntime() {
@@ -143,7 +138,31 @@ async function addColumnIfMissing(db, table, column, definition) {
 }
 
 async function ensureDesktopSchema(db) {
-  // ─── جدول القوائم المغلقة ───────────────────────────────────────────
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS withdrawals (
+      id              TEXT PRIMARY KEY,
+      amount          INTEGER NOT NULL DEFAULT 0,
+      withdrawer_type TEXT NOT NULL,
+      person_name     TEXT NOT NULL,
+      date            TEXT NOT NULL,
+      driver_id       TEXT,
+      person_id       TEXT,
+      person_type     TEXT,
+      withdrawal_details TEXT,
+      applied_amount  INTEGER NOT NULL DEFAULT 0,
+      debt_amount     INTEGER NOT NULL DEFAULT 0,
+      debt_paid       INTEGER NOT NULL DEFAULT 0,
+      sheet_opened_at TEXT,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL,
+      is_deleted      INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_date ON withdrawals(date) WHERE is_deleted=0");
+  await addColumnIfMissing(db, "withdrawals", "person_id", "TEXT");
+  await addColumnIfMissing(db, "withdrawals", "person_type", "TEXT");
+  await addColumnIfMissing(db, "withdrawals", "withdrawal_details", "TEXT");
+  await addColumnIfMissing(db, "withdrawals", "debt_paid", "INTEGER NOT NULL DEFAULT 0");
   try {
     await db.execute(`
       CREATE TABLE IF NOT EXISTS driver_sheets (
@@ -152,6 +171,10 @@ async function ensureDesktopSchema(db) {
         sheet_opened_at TEXT NOT NULL,
         sheet_closed_at TEXT NOT NULL,
         total_amount    INTEGER NOT NULL DEFAULT 0,
+        commission_rate INTEGER NOT NULL DEFAULT 0,
+        commission_amount INTEGER NOT NULL DEFAULT 0,
+        withdrawal_amount INTEGER NOT NULL DEFAULT 0,
+        withdrawal_details TEXT,
         items_count     INTEGER NOT NULL DEFAULT 0,
         notes           TEXT,
         created_at      TEXT NOT NULL,
@@ -159,6 +182,10 @@ async function ensureDesktopSchema(db) {
         is_deleted      INTEGER NOT NULL DEFAULT 0
       )
     `);
+    await addColumnIfMissing(db, "driver_sheets", "commission_rate", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnIfMissing(db, "driver_sheets", "commission_amount", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnIfMissing(db, "driver_sheets", "withdrawal_amount", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnIfMissing(db, "driver_sheets", "withdrawal_details", "TEXT");
     await db.execute("CREATE INDEX IF NOT EXISTS idx_driver_sheets_driver ON driver_sheets(driver_id) WHERE is_deleted=0");
     await db.execute("CREATE INDEX IF NOT EXISTS idx_driver_sheets_date ON driver_sheets(sheet_closed_at) WHERE is_deleted=0");
   } catch (e) {
@@ -180,19 +207,11 @@ async function ensureDesktopSchema(db) {
   await addColumnIfMissing(db, "drivers", "updated_at", "TEXT");
   await addColumnIfMissing(db, "drivers", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(db, "drivers", "driver_number", "INTEGER");
-  // ترقيم تسلسلي للسواق الذين ليس لديهم رقم
-  try {
-    const missing = await db.select("SELECT id FROM drivers WHERE driver_number IS NULL AND is_deleted=0 ORDER BY created_at ASC");
-    if (missing.length > 0) {
-      const maxRes = await db.select("SELECT COALESCE(MAX(driver_number), 0) as m FROM drivers");
-      let n = (maxRes[0]?.m || 0) + 1;
-      for (const d of missing) await db.execute("UPDATE drivers SET driver_number=? WHERE id=?", [n++, d.id]);
-    }
-  } catch(e) {}
   // ─── حقول نظام قائمة السائق ───────────────────────────────────────────────
   await addColumnIfMissing(db, "drivers", "sheet_status", "TEXT NOT NULL DEFAULT 'closed'");
   await addColumnIfMissing(db, "drivers", "sheet_opened_at", "TEXT");
   await addColumnIfMissing(db, "drivers", "is_paid", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing(db, "drivers", "debt", "INTEGER NOT NULL DEFAULT 0");
 
   await addColumnIfMissing(db, "invoice_items", "invoice_id", "TEXT NOT NULL");
   await addColumnIfMissing(db, "invoice_items", "product_name", "TEXT NOT NULL");
@@ -288,11 +307,12 @@ export async function deleteTrader(id) {
 // ─── Drivers ─────────────────────────────────────────────────────────────────
 export async function getDrivers() {
   if (!isTauriRuntime()) {
-    ensureFallbackDriverNumbers();
-    return getFallbackRecords("drivers").filter(item => item.is_deleted !== 1).sort((a, b) => (a.driver_number || 0) - (b.driver_number || 0));
+    return getFallbackRecords("drivers")
+      .filter(item => item.is_deleted !== 1)
+      .sort((a, b) => (a.driver_number ?? 1e9) - (b.driver_number ?? 1e9) || a.name.localeCompare(b.name));
   }
   const db = await getDb();
-  return db.select("SELECT * FROM drivers WHERE is_deleted=0 ORDER BY driver_number ASC, name ASC");
+  return db.select("SELECT * FROM drivers WHERE is_deleted=0 ORDER BY driver_number IS NULL, driver_number ASC, name ASC");
 }
 
 /** جلب السواق الذين لديهم قائمة مفتوحة فقط (للاختيار في بنود المبيعات) */
@@ -359,7 +379,11 @@ export async function openDriverSheetWithInventory(driverId, items) {
 }
 
 /** إغلاق قائمة السائق مع حفظ في جدول driver_sheets */
-export async function closeDriverSheet(driverId) {
+export async function closeDriverSheet(driverId, { commissionRate = 0, commissionAmount = 0, withdrawalAmount = 0, withdrawalDetails = "" } = {}) {
+  const normalizedCommissionRate = Math.max(0, Math.min(100, Number(commissionRate) || 0));
+  const normalizedCommission = Math.max(0, Math.round(Number(commissionAmount) || 0));
+  const normalizedWithdrawal = Math.max(0, Math.round(Number(withdrawalAmount) || 0));
+  const normalizedWithdrawalDetails = String(withdrawalDetails || "").trim() || null;
   if (!isTauriRuntime()) {
     const driver = getFallbackRecords("drivers").find(d => d.id === driverId);
     if (!driver) return;
@@ -370,6 +394,7 @@ export async function closeDriverSheet(driverId) {
       const itemAmount = roundDownToStep(item.net_weight * (item.price / 100), 250);
       return sum + itemAmount;
     }, 0);
+    const debtDeducted = Math.min(Number(driver.debt || 0), totalAmount);
     
     // حفظ في driver_sheets
     const sheetId = uuid();
@@ -382,6 +407,10 @@ export async function closeDriverSheet(driverId) {
       sheet_opened_at: driver.sheet_opened_at,
       sheet_closed_at: ts,
       total_amount: totalAmount,
+      commission_rate: normalizedCommissionRate,
+      commission_amount: normalizedCommission,
+      withdrawal_amount: normalizedWithdrawal,
+      withdrawal_details: normalizedWithdrawalDetails,
       items_count: sheetItems.length,
       notes: null,
       is_deleted: 0,
@@ -391,12 +420,12 @@ export async function closeDriverSheet(driverId) {
     persistFallbackStore(store);
     
     // تحديث حالة السائق
-    updateFallbackRecord("drivers", driverId, row => ({ ...row, sheet_status: 'closed', updated_at: ts }));
+    updateFallbackRecord("drivers", driverId, row => ({ ...row, sheet_status: 'closed', debt: Math.max(0, Number(row.debt || 0) - debtDeducted), updated_at: ts }));
     return;
   }
   
   const db = await getDb();
-  const driver = await db.select("SELECT sheet_opened_at FROM drivers WHERE id=?", [driverId]);
+  const driver = await db.select("SELECT sheet_opened_at, debt FROM drivers WHERE id=?", [driverId]);
   if (!driver[0]) return;
   
   const sheetItems = await db.select(`
@@ -409,18 +438,26 @@ export async function closeDriverSheet(driverId) {
     const itemAmount = roundDownToStep(item.net_weight * (item.price / 100), 250);
     return sum + itemAmount;
   }, 0);
+  const debtDeducted = Math.min(Number(driver[0].debt || 0), totalAmount);
   
   const ts = now();
   const sheetId = uuid();
   
   // حفظ في driver_sheets
   await db.execute(`
-    INSERT INTO driver_sheets (id, driver_id, sheet_opened_at, sheet_closed_at, total_amount, items_count, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `, [sheetId, driverId, driver[0].sheet_opened_at, ts, totalAmount, sheetItems.length, ts, ts]);
+    INSERT INTO driver_sheets (
+      id, driver_id, sheet_opened_at, sheet_closed_at, total_amount,
+      commission_rate, commission_amount, withdrawal_amount, withdrawal_details,
+      items_count, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    sheetId, driverId, driver[0].sheet_opened_at, ts, totalAmount,
+    normalizedCommissionRate, normalizedCommission, normalizedWithdrawal, normalizedWithdrawalDetails,
+    sheetItems.length, ts, ts,
+  ]);
   
   // تحديث حالة السائق
-  await db.execute("UPDATE drivers SET sheet_status='closed', updated_at=? WHERE id=?", [ts, driverId]);
+  await db.execute("UPDATE drivers SET debt=MAX(0, debt-?), sheet_status='closed', updated_at=? WHERE id=?", [debtDeducted, ts, driverId]);
 }
 
 function roundDownToStep(value, step) {
@@ -525,7 +562,7 @@ export async function getDriverAvailableInventory(driverId) {
   return Array.from(inventory, ([product_name, basket_count]) => ({
     product_name,
     basket_count: Math.max(0, basket_count),
-  })).filter(item => item.basket_count > 0);
+  })).filter(item => item.basket_count > 0 || isFixedMaterial(item.product_name));
 }
 
 /** تصفير مخزون القائمة المتبقي واعتباره تالفاً قبل الإغلاق اليدوي */
@@ -565,26 +602,32 @@ export async function discardDriverSheetInventory(driverId) {
   `, [now(), driverId, driver[0].sheet_opened_at || ""]);
 }
 
-export async function createDriver({ name, phone = null, vehicle_plate = null, notes = null }) {
+export async function createDriver({ name, phone = null, driver_number = null, notes = null }) {
+  const num = normalizeDriverNumber(driver_number);
   if (!isTauriRuntime()) {
     const store = ensureFallbackStore(); const id = uuid(); const ts = now();
-    const maxNum = (store.drivers || []).reduce((max, d) => Math.max(max, d.driver_number || 0), 0);
-    store.drivers.push({ id, name, phone, vehicle_plate, notes, driver_number: maxNum + 1, sheet_status: 'closed', sheet_opened_at: null, is_paid: 0, is_deleted: 0, created_at: ts, updated_at: ts });
+    store.drivers.push({ id, name, phone, notes, driver_number: num, sheet_status: 'closed', sheet_opened_at: null, is_paid: 0, debt: 0, is_deleted: 0, created_at: ts, updated_at: ts });
     persistFallbackStore(store); return id;
   }
   const db = await getDb(); const id = uuid(); const ts = now();
-  const numRows = await db.select("SELECT COALESCE(MAX(driver_number), 0) + 1 as next_num FROM drivers");
-  const driverNumber = numRows[0]?.next_num || 1;
-  await db.execute("INSERT INTO drivers (id, name, phone, vehicle_plate, notes, driver_number, sheet_status, is_paid, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'closed', 0, ?, ?)", [id, name, phone, vehicle_plate, notes, driverNumber, ts, ts]);
+  await db.execute(
+    "INSERT INTO drivers (id, name, phone, notes, driver_number, sheet_status, is_paid, debt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'closed', 0, 0, ?, ?)",
+    [id, name, phone, notes, num, ts, ts]
+  );
   return id;
 }
 
 export async function updateDriver(id, fields) {
+  const num = normalizeDriverNumber(fields.driver_number);
   if (!isTauriRuntime()) {
-    updateFallbackRecord("drivers", id, row => ({ ...row, name: fields.name, phone: fields.phone ?? null, vehicle_plate: fields.vehicle_plate ?? null, notes: fields.notes ?? null, updated_at: now() })); return;
+    updateFallbackRecord("drivers", id, row => ({ ...row, name: fields.name, phone: fields.phone ?? null, driver_number: num, notes: fields.notes ?? null, updated_at: now() }));
+    return;
   }
   const db = await getDb();
-  await db.execute("UPDATE drivers SET name=?, phone=?, vehicle_plate=?, notes=?, updated_at=? WHERE id=?", [fields.name, fields.phone ?? null, fields.vehicle_plate ?? null, fields.notes ?? null, now(), id]);
+  await db.execute(
+    "UPDATE drivers SET name=?, phone=?, driver_number=?, notes=?, updated_at=? WHERE id=?",
+    [fields.name, fields.phone ?? null, num, fields.notes ?? null, now(), id]
+  );
 }
 
 export async function deleteDriver(id) {
@@ -598,7 +641,6 @@ export async function getDriverByNumber(number) {
   const num = parseInt(number, 10);
   if (!num || num < 1) return null;
   if (!isTauriRuntime()) {
-    ensureFallbackDriverNumbers();
     return getFallbackRecords("drivers").find(d => d.driver_number === num && d.is_deleted !== 1) ?? null;
   }
   const db = await getDb();
@@ -625,7 +667,7 @@ export async function getInvoices({ from = null, to = null, status = null, trade
   }
   const db = await getDb();
   let where = "i.is_deleted=0"; const params = [];
-  if (from)      { where += " AND i.date >= ?"; params.push(from); }
+    if (from)      { where += " AND i.date >= ?"; params.push(from); }
   if (to)        { where += " AND i.date <= ?"; params.push(to); }
   if (status)    { where += " AND i.status = ?"; params.push(status); }
   if (trader_id) { where += " AND i.trader_id = ?"; params.push(trader_id); }
@@ -642,7 +684,7 @@ export async function getInvoice(id) {
   }
   const db = await getDb();
   const rows = await db.select(`SELECT i.*, t.name as trader_name, d.name as driver_name, d.vehicle_plate as vehicle_plate FROM invoices i LEFT JOIN traders t ON i.trader_id = t.id LEFT JOIN drivers d ON i.driver_id = d.id WHERE i.id=? AND i.is_deleted=0`, [id]);
-  return rows[0] ?? null;
+    return rows[0] ?? null;
 }
 
 export async function createInvoice({ trader_id, driver_id = null, date, notes = null }) {
@@ -652,7 +694,7 @@ export async function createInvoice({ trader_id, driver_id = null, date, notes =
     return id;
   }
   const db = await getDb(); const id = uuid(); const ts = now();
-  await db.execute(`INSERT INTO invoices (id, trader_id, driver_id, date, status, total_final, paid_amount, remaining, notes, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', 0, 0, 0, ?, ?, ?)`, [id, trader_id, driver_id, date, notes, ts, ts]);
+    await db.execute(`INSERT INTO invoices (id, trader_id, driver_id, date, status, total_final, paid_amount, remaining, notes, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', 0, 0, 0, ?, ?, ?)`, [id, trader_id, driver_id, date, notes, ts, ts]);
   return id;
 }
 
@@ -778,6 +820,203 @@ export async function deleteInvoiceItem(id) {
   await db.execute("UPDATE invoice_items SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
 }
 
+// ─── تعديل/حذف مواد مخزون قائمة السائق المفتوحة ───────────────────────────
+/** يتحقق أن المباع من المواد المعنية لا يتجاوز الوارد بعد التعديل؛ يعيد اسم أول مادة مخالفة أو null */
+function findInventoryShortage(items, productNames) {
+  const balance = new Map();
+  for (const it of items) {
+    const name = it.product_name?.trim();
+    if (!name || !productNames.has(name)) continue;
+    const count = Number(it.basket_count || 0);
+    balance.set(name, (balance.get(name) || 0) + (it.trader_id ? -count : count));
+  }
+  for (const [name, value] of balance) if (value < 0) return name;
+  return null;
+}
+
+async function getInventoryContext(driverId, itemId) {
+  const items = await getDriverSheetItems(driverId);
+  const target = items.find(it => it.id === itemId && it.trader_id == null);
+  if (!target) throw new Error("المادة غير موجودة في مخزون هذه القائمة");
+  return { items, target };
+}
+
+export async function updateDriverInventoryItem(driverId, itemId, { product_name, basket_count }) {
+  const name = String(product_name || "").trim();
+  const count = Number(basket_count);
+  if (!name) throw new Error("اسم المادة مطلوب");
+  if (!Number.isInteger(count) || (count <= 0 && !isFixedMaterial(name))) {
+    throw new Error("أدخل عدد سلات صحيحاً أكبر من صفر");
+  }
+
+  const { items, target } = await getInventoryContext(driverId, itemId);
+  const next = items.map(it => it.id === itemId ? { ...it, product_name: name, basket_count: count } : it);
+  const shortage = findInventoryShortage(next, new Set([target.product_name?.trim(), name]));
+  if (shortage) throw new Error(`لا يمكن التعديل: المباع من «${shortage}» أكبر من الكمية المتبقية بعد التعديل`);
+
+  const ts = now();
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("invoice_items", itemId, row => ({ ...row, product_name: name, basket_count: count, updated_at: ts }));
+  } else {
+    const db = await getDb();
+    await db.execute("UPDATE invoice_items SET product_name=?, basket_count=?, updated_at=? WHERE id=? AND is_deleted=0", [name, count, ts, itemId]);
+  }
+  return { product_name: name, basket_count: count, updated_at: ts };
+}
+
+export async function deleteDriverInventoryItem(driverId, itemId) {
+  const { items, target } = await getInventoryContext(driverId, itemId);
+  const next = items.filter(it => it.id !== itemId);
+  const shortage = findInventoryShortage(next, new Set([target.product_name?.trim()]));
+  if (shortage) throw new Error(`لا يمكن الحذف: المباع من «${shortage}» أكبر من الكمية المتبقية بعد الحذف`);
+  await deleteInvoiceItem(itemId);
+}
+
+/** حفظ مسودة مواد مخزون السائق دفعة واحدة (إضافة، تعديل، حذف). */
+export async function saveDriverInventory(driverId, draftItems = []) {
+  const currentItems = await getDriverSheetItems(driverId);
+  const currentInventory = currentItems.filter(item => item.trader_id == null);
+  const currentById = new Map(currentInventory.map(item => [item.id, item]));
+  const draftIds = new Set(draftItems.filter(item => item.id).map(item => item.id));
+
+  const proposedItems = currentItems
+    .filter(item => item.trader_id != null || draftIds.has(item.id))
+    .map(item => {
+      const draft = draftItems.find(candidate => candidate.id === item.id);
+      return draft ? { ...item, product_name: draft.product_name, basket_count: draft.basket_count } : item;
+    });
+  const proposedNames = new Set(draftItems.map(item => String(item.product_name || "").trim()));
+  for (const item of draftItems.filter(item => !item.id)) {
+    proposedItems.push({ ...item, trader_id: null });
+  }
+  const shortage = findInventoryShortage(proposedItems, proposedNames);
+  if (shortage) throw new Error(`لا يمكن الحفظ: المباع من «${shortage}» أكبر من الكمية المتاحة`);
+
+  for (const item of currentInventory) {
+    if (!draftIds.has(item.id)) await deleteInvoiceItem(item.id);
+  }
+  for (const item of draftItems) {
+    const name = String(item.product_name || "").trim();
+    const count = Number(item.basket_count);
+    if (!name || !Number.isInteger(count) || (count <= 0 && !isFixedMaterial(name))) {
+      throw new Error("بيانات مادة المخزون غير صحيحة");
+    }
+    if (item.id && currentById.has(item.id)) {
+      await updateDriverInventoryItem(driverId, item.id, { product_name: name, basket_count: count });
+      continue;
+    }
+    const invoiceId = currentInventory[0]?.invoice_id || await createInvoice({
+      trader_id: null, driver_id: driverId, date: now(), notes: "إضافة مواد إلى قائمة السائق",
+    });
+    await upsertInvoiceItem({
+      invoice_id: invoiceId, product_name: name, gross_weight: 0, basket_count: count,
+      basket_weight_each: 0, net_weight: 0, price: 0, basket_price: 0,
+      amount_before: 0, commission_rate: 0, commission_value: 0, amount_after_comm: 0,
+      porterage: 0, final_amount: 0, driver_id: driverId,
+    });
+  }
+}
+
+export async function transferInvoiceItemDriver(itemId, newDriverId) {
+  // ─── أ) التحقق الاستباقي: لا يُعدَّل شيء قبل اكتمال كل الفحوصات ───
+  if (!itemId || !newDriverId) throw new Error("بيانات النقل ناقصة");
+ 
+  let item = null;
+  if (!isTauriRuntime()) {
+    const current = getFallbackRecords("invoice_items").find(r => r.id === itemId && r.is_deleted !== 1);
+    const invoice = current
+      ? getFallbackRecords("invoices").find(r => r.id === current.invoice_id && r.is_deleted !== 1)
+      : null;
+    item = current && invoice ? { ...current, trader_id: invoice.trader_id } : null;
+  } else {
+    const db = await getDb();
+    const rows = await db.select(`
+      SELECT ii.*, i.trader_id
+      FROM invoice_items ii
+      INNER JOIN invoices i ON i.id = ii.invoice_id
+      WHERE ii.id=? AND ii.is_deleted=0 AND i.is_deleted=0
+    `, [itemId]);
+    item = rows[0] ?? null;
+  }
+ 
+  if (!item) throw new Error("البند أو الفاتورة غير موجودة");
+  if (item.trader_id == null) throw new Error("لا يمكن نقل بند مخزون");
+ 
+  const oldDriverId = item.driver_id;
+  if (String(oldDriverId) === String(newDriverId)) return;
+ 
+  const drivers = await getDrivers();
+  const oldDriver = drivers.find(d => String(d.id) === String(oldDriverId));
+  const newDriver = drivers.find(d => String(d.id) === String(newDriverId));
+  if (!oldDriver) throw new Error("السائق القديم غير موجود");
+  if (!newDriver) throw new Error("السائق الجديد غير موجود");
+  if (newDriver.sheet_status !== "open") throw new Error("السائق الجديد لا يملك قائمة مفتوحة");
+ 
+  const needed = Number(item.basket_count || 0);
+  const available = await getDriverAvailableInventory(newDriverId);
+  const stock = available.find(r => r.product_name === item.product_name);
+  if (!stock || Number(stock.basket_count) < needed) {
+    throw new Error("رصيد السائق الجديد لا يكفي");
+  }
+ 
+  // ─── ب) الرصيد غير مخزَّن: هو محسوب من driver_id + created_at ───
+  // لذلك النقل = تحديث واحد للبند. وإن كان البند أقدم من فتح قائمة السائق الجديد
+  // فسيُستبعد من حسابه، فنرفع created_at إلى الآن ليدخل ضمن قائمته.
+  const ts = now();
+  const reopenedAfterItem = newDriver.sheet_opened_at && (item.created_at || "") < newDriver.sheet_opened_at;
+  const newCreatedAt = reopenedAfterItem ? ts : item.created_at;
+ 
+  // ─── ج) تحديث واحد ذري (بدون BEGIN/COMMIT) ───
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("invoice_items", itemId, row => ({
+      ...row, driver_id: newDriverId, created_at: newCreatedAt, updated_at: ts,
+    }));
+  } else {
+    const db = await getDb();
+    await db.execute(
+      "UPDATE invoice_items SET driver_id=?, created_at=?, updated_at=? WHERE id=? AND driver_id=? AND is_deleted=0",
+      [newDriverId, newCreatedAt, ts, itemId, oldDriverId]
+    );
+  }
+ 
+  // ─── د) تحديث اختياري لا يُفشل النقل إن تعذّر ───
+  try {
+    if (!isTauriRuntime()) {
+      updateFallbackRecord("invoices", item.invoice_id, row => ({ ...row, driver_id: newDriverId, updated_at: ts }));
+    } else {
+      const db = await getDb();
+      await db.execute("UPDATE invoices SET driver_id=?, updated_at=? WHERE id=? AND is_deleted=0", [newDriverId, ts, item.invoice_id]);
+    }
+  } catch (e) {
+    console.warn("تعذر تحديث driver_id للفاتورة (غير حرج):", e);
+  }
+}
+ 
+ 
+// ════════════════════════════════════════════════════════════════
+// 2) Invoices.jsx — أضف هذه الـ state مع بقية الـ states:
+// ════════════════════════════════════════════════════════════════
+// const [transferring, setTransferring] = useState(false);
+ 
+// ثم استبدل handleDriverTransfer بالكامل:
+async function handleDriverTransfer(itemId, newDriverId) {
+  if (transferring) return; // يمنع الضغط المتكرر أثناء التنفيذ
+  setTransferring(true);
+  try {
+    await transferInvoiceItemDriver(itemId, newDriverId);
+    await loadData();
+    showToast("تم نقل البند وتحديث مخزون السائقين");
+  } catch (error) {
+    // أخطاء Tauri SQL تأتي أحياناً كنص وليس Error
+    const msg = error?.message || (typeof error === "string" ? error : "") || "تعذر نقل البند إلى السائق الجديد";
+    console.error("خطأ نقل السائق:", error);
+    showToast(msg);
+  } finally {
+    setTransferring(false);
+  }
+}
+ 
+
 // ─── Payments ────────────────────────────────────────────────────────────────
 export async function getPayments(filters = {}) {
   const { from, to } = filters;
@@ -812,6 +1051,238 @@ export async function createPayment({ trader_id, amount, date, notes = null }) {
   await db.execute("UPDATE traders SET debt_fils = debt_fils - ?, updated_at=? WHERE id=?", [amount, ts, trader_id]);
   await db.execute(`INSERT INTO transactions_log (id, type, ref_id, trader_id, amount, description, date, created_at) VALUES (?, 'payment', ?, ?, ?, ?, ?, ?)`, [uuid(), id, trader_id, amount, "دفعة تسوية دين", date, ts]);
   return id;
+}
+
+// ─── Withdrawals ────────────────────────────────────────────────────────────
+export async function getWithdrawals({ from = null, to = null } = {}) {
+  if (!isTauriRuntime()) {
+    return getFallbackRecords("withdrawals")
+      .filter(row => row.is_deleted !== 1)
+      .filter(row => !from || row.date >= from)
+      .filter(row => !to || row.date <= to)
+      .map(row => ({
+        ...row,
+        withdrawerType: row.withdrawer_type,
+        personName: row.person_name,
+        withdrawalDetails: row.withdrawal_details || "",
+        personId: row.person_id || row.driver_id || null,
+        personType: row.person_type || row.withdrawer_type,
+      }))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }
+  const db = await getDb();
+  let query = "SELECT id, amount, withdrawer_type AS withdrawerType, person_name AS personName, withdrawal_details AS withdrawalDetails, date, driver_id, person_id AS personId, person_type AS personType, applied_amount, debt_amount, debt_paid, sheet_opened_at, created_at FROM withdrawals WHERE is_deleted=0";
+  const params = [];
+  if (from) { query += " AND date(date) >= date(?)"; params.push(from); }
+  if (to) { query += " AND date(date) <= date(?)"; params.push(to); }
+  query += " ORDER BY date DESC, created_at DESC";
+  return db.select(query, params);
+}
+
+export async function getDebtInvoices() {
+  const withdrawals = await getWithdrawals();
+  return withdrawals
+    .filter(withdrawal => Number(withdrawal.debt_amount || 0) - Number(withdrawal.debt_paid || 0) > 0)
+    .map(withdrawal => ({
+      id: `debt-${withdrawal.id}`,
+      withdrawalId: withdrawal.id,
+      personId: withdrawal.personId || withdrawal.driver_id,
+      personType: withdrawal.personType || withdrawal.withdrawerType,
+      personName: withdrawal.personName,
+      date: withdrawal.date,
+      total_final: Number(withdrawal.debt_amount),
+      paid_amount: Number(withdrawal.debt_paid || 0),
+      remaining: Math.max(0, Number(withdrawal.debt_amount) - Number(withdrawal.debt_paid || 0)),
+      operationType: "سحب",
+      product_summary: "سحب",
+      notes: withdrawal.withdrawalDetails || `تفاصيل السحب: مبلغ ${withdrawal.amount}`,
+      details: withdrawal.withdrawalDetails || `تفاصيل السحب: مبلغ ${withdrawal.amount}`,
+    }));
+}
+
+export async function settleDebtWithdrawal({ withdrawalId, amount }) {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error("مبلغ التسديد غير صحيح");
+
+  const withdrawal = (await getWithdrawals()).find(row => row.id === withdrawalId);
+  if (!withdrawal) throw new Error("فاتورة الدين غير موجودة");
+
+  const debtAmount = Number(withdrawal.debt_amount || 0);
+  const debtPaid = Number(withdrawal.debt_paid || 0);
+  const remaining = Math.max(0, debtAmount - debtPaid);
+  if (numericAmount > remaining) throw new Error("المبلغ المسدد أكبر من الدين المتبقي");
+
+  const personType = withdrawal.personType || withdrawal.withdrawerType;
+  const people = personType === "driver" ? await getDrivers() : await getTraders();
+  const person = people.find(row =>
+    (withdrawal.personId && String(row.id) === String(withdrawal.personId)) || row.name === withdrawal.personName
+  );
+  if (!person) throw new Error("صاحب الدين غير موجود");
+
+  const nextDebtPaid = debtPaid + numericAmount;
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("withdrawals", withdrawalId, row => ({ ...row, debt_paid: nextDebtPaid, updated_at: now() }));
+    if (personType === "driver") {
+      updateFallbackRecord("drivers", person.id, row => ({ ...row, debt: Math.max(0, Number(row.debt || 0) - numericAmount), updated_at: now() }));
+    } else {
+      updateFallbackRecord("traders", person.id, row => ({ ...row, debt_fils: Math.max(0, Number(row.debt_fils || 0) - numericAmount), updated_at: now() }));
+    }
+    pushFallbackRecord("transactions_log", {
+      id: uuid(), type: "debt_withdrawal_settlement", ref_id: withdrawalId,
+      amount: numericAmount, description: `تسديد دين سحب - ${withdrawal.personName}`,
+      date: now(), created_at: now(), is_deleted: 0,
+    });
+    return;
+  }
+
+  const db = await getDb();
+  await db.execute("UPDATE withdrawals SET debt_paid=?, updated_at=? WHERE id=?", [nextDebtPaid, now(), withdrawalId]);
+  if (personType === "driver") {
+    await db.execute("UPDATE drivers SET debt=MAX(0, debt-?), updated_at=? WHERE id=?", [numericAmount, now(), person.id]);
+  } else {
+    await db.execute("UPDATE traders SET debt_fils=MAX(0, debt_fils-?), updated_at=? WHERE id=?", [numericAmount, now(), person.id]);
+  }
+  await db.execute(
+    "INSERT INTO transactions_log (id, type, ref_id, amount, description, date, created_at, is_deleted) VALUES (?, 'debt_withdrawal_settlement', ?, ?, ?, ?, ?, 0)",
+    [uuid(), withdrawalId, numericAmount, `تسديد دين سحب - ${withdrawal.personName}`, now(), now()]
+  );
+}
+
+export async function createWithdrawal({ amount, withdrawerType, personName, withdrawalDetails = "", date, driverId = null, personId = null, personType = withdrawerType, appliedAmount = 0, debtAmount = 0, debtPaid = 0, sheetOpenedAt = null }) {
+  const withdrawal = {
+    id: uuid(), amount: Number(amount || 0), withdrawer_type: withdrawerType,
+    person_name: personName.trim(), withdrawal_details: String(withdrawalDetails || "").trim(), date, driver_id: driverId, person_id: personId, person_type: personType,
+    applied_amount: Number(appliedAmount || 0), debt_amount: Number(debtAmount || 0), debt_paid: Number(debtPaid || 0), sheet_opened_at: sheetOpenedAt,
+  };
+  const ts = now();
+  if (!isTauriRuntime()) {
+    pushFallbackRecord("withdrawals", { ...withdrawal, created_at: ts, updated_at: ts, is_deleted: 0 });
+    return withdrawal.id;
+  }
+  const db = await getDb();
+  await db.execute(
+    "INSERT INTO withdrawals (id, amount, withdrawer_type, person_name, withdrawal_details, date, driver_id, person_id, person_type, applied_amount, debt_amount, debt_paid, sheet_opened_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [withdrawal.id, withdrawal.amount, withdrawal.withdrawer_type, withdrawal.person_name, withdrawal.withdrawal_details, withdrawal.date, withdrawal.driver_id, withdrawal.person_id, withdrawal.person_type, withdrawal.applied_amount, withdrawal.debt_amount, withdrawal.debt_paid, withdrawal.sheet_opened_at, ts, ts]
+  );
+  return withdrawal.id;
+}
+
+/** يوجه السحب حسب صاحبه ويعيد تفصيل المبلغ المطبق والدين المرحل. */
+export async function processWithdrawal({ amount, withdrawerType, personName, withdrawalDetails: details = "", personId = null, date = today() }) {
+  const normalizedAmount = Math.round(Number(amount));
+  const normalizedName = String(personName || "").trim();
+  if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) throw new Error("مبلغ السحب غير صحيح");
+  if (!normalizedName) throw new Error("اسم الساحب مطلوب");
+
+  if (withdrawerType === "partner") {
+    return createWithdrawal({ amount: normalizedAmount, withdrawerType, personName: normalizedName, withdrawalDetails: details, date });
+  }
+
+  const [traders, drivers] = await Promise.all([getTraders(), getDrivers()]);
+  const person = withdrawerType === "grocer"
+    ? traders.find(row => (personId && String(row.id) === String(personId)) || row.name === normalizedName)
+    : drivers.find(row => (personId && String(row.id) === String(personId)) || row.name === normalizedName);
+  if (!person) throw new Error("الساحب غير موجود");
+
+  const ts = now();
+  let withdrawalDetails = {
+    amount: normalizedAmount, withdrawerType, personName: normalizedName, withdrawalDetails: details, date,
+    driverId: null, personId: person.id, personType: withdrawerType, appliedAmount: 0, debtAmount: 0, sheetOpenedAt: null,
+  };
+
+  if (withdrawerType === "grocer") {
+    const nextDebt = Number(person.debt_fils || 0) + normalizedAmount;
+    withdrawalDetails = { ...withdrawalDetails, debtAmount: normalizedAmount };
+    if (!isTauriRuntime()) {
+      updateFallbackRecord("traders", person.id, row => ({ ...row, debt_fils: nextDebt, updated_at: ts }));
+      return createWithdrawal(withdrawalDetails);
+    }
+    const db = await getDb();
+    await db.execute("UPDATE traders SET debt_fils=?, updated_at=? WHERE id=?", [nextDebt, ts, person.id]);
+    return createWithdrawal(withdrawalDetails);
+  }
+
+  const driverItems = await getDriverSheetItems(person.id);
+  const sheetOpenedAt = person.sheet_opened_at || null;
+  const grossBalance = sheetOpenedAt
+    ? driverItems
+      .filter(item => item.trader_id != null && item.created_at >= sheetOpenedAt)
+      .reduce((total, item) => total + Math.max(0, Math.round(Number(item.net_weight || 0) * Number(item.price || 0))), 0)
+    : 0;
+  const priorApplied = (await getWithdrawals())
+    .filter(row => String(row.driver_id) === String(person.id) && row.sheet_opened_at === sheetOpenedAt)
+    .reduce((total, row) => total + Number(row.applied_amount || 0), 0);
+  const available = Math.max(0, grossBalance - Number(person.debt || 0) - priorApplied);
+  const appliedAmount = Math.min(normalizedAmount, available);
+  const debtAmount = normalizedAmount - appliedAmount;
+  withdrawalDetails = { ...withdrawalDetails, driverId: person.id, appliedAmount, debtAmount, sheetOpenedAt };
+
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("drivers", person.id, row => ({ ...row, debt: Number(row.debt || 0) + debtAmount, updated_at: ts }));
+    return createWithdrawal(withdrawalDetails);
+  }
+  const db = await getDb();
+  await db.execute("UPDATE drivers SET debt=debt+?, updated_at=? WHERE id=?", [debtAmount, ts, person.id]);
+  return createWithdrawal(withdrawalDetails);
+}
+
+export async function deleteWithdrawal(id) {
+  const withdrawal = (await getWithdrawals()).find(row => row.id === id);
+  if (!withdrawal) throw new Error("السحب غير موجود");
+
+  const remaining = Math.max(
+    0,
+    Number(withdrawal.debt_amount || 0) - Number(withdrawal.debt_paid || 0),
+  );
+  if (remaining > 0) {
+    throw new Error("لا يمكن حذف سحب غير مسدد");
+  }
+
+  if (!isTauriRuntime()) {
+    updateFallbackRecord("withdrawals", id, row => ({ ...row, is_deleted: 1, updated_at: now() }));
+    const store = ensureFallbackStore();
+    store.transactions_log = (store.transactions_log || []).map(transaction => (
+      transaction.type === "debt_withdrawal_settlement" && transaction.ref_id === id
+        ? { ...transaction, is_deleted: 1 }
+        : transaction
+    ));
+    persistFallbackStore(store);
+    return;
+  }
+  const db = await getDb();
+  await db.execute("UPDATE withdrawals SET is_deleted=1, updated_at=? WHERE id=?", [now(), id]);
+  await db.execute(
+    "UPDATE transactions_log SET is_deleted=1 WHERE type='debt_withdrawal_settlement' AND ref_id=?",
+    [id]
+  );
+}
+
+export async function calculateNetProfits({ from = null, to = null } = {}) {
+  const invoices = await getInvoices({ from, to, status: "posted" });
+  const invoiceItems = await Promise.all(invoices.map(invoice => getInvoiceItems(invoice.id)));
+  const totalCommissions = invoiceItems.flat().reduce(
+    (total, item) => total + Number(item.commission_value || 0), 0
+  );
+  const drivers = await getDrivers();
+  const driverSheets = (await Promise.all(
+    drivers.map(driver => getClosedDriverSheets(driver.id))
+  )).flat().filter(sheet =>
+    (!from || String(sheet.sheet_closed_at || "").slice(0, 10) >= from) &&
+    (!to || String(sheet.sheet_closed_at || "").slice(0, 10) <= to)
+  );
+  const driverCommissions = driverSheets.reduce(
+    (total, sheet) => total + Number(sheet.commission_amount || 0), 0
+  );
+  const withdrawals = await getWithdrawals({ from, to });
+  const settledWithdrawalDebts = (await getTransactions({ from, to }))
+    .filter(transaction => transaction.type === "debt_withdrawal_settlement")
+    .reduce((total, transaction) => total + Number(transaction.amount || 0), 0);
+  const totalWithdrawals = withdrawals.reduce((total, row) => total + Number(row.amount || 0), 0) - settledWithdrawalDebts;
+  return {
+    totalCommissions: totalCommissions + driverCommissions + settledWithdrawalDebts,
+    totalWithdrawals,
+    netProfits: totalCommissions + driverCommissions - totalWithdrawals,
+  };
 }
 
 export async function getTraderUnpaidInvoices(traderId) {

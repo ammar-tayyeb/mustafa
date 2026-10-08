@@ -1,11 +1,14 @@
 import { Plus, CheckCircle, PlusCircle, User, Trash2, Check, Clock, Pin, Users, Send, Printer } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
-import { getInvoices, createInvoice, updateInvoiceTotals, postInvoice, deleteInvoice, getInvoiceItems, upsertInvoiceItem, deleteInvoiceItem, getTraders, deleteTrader, getActiveDrivers, getDrivers, getAllSettings, openDriverSheet, getDriverByNumber, getDriverAvailableInventory } from "../lib/db.js";
+import { getInvoices, createInvoice, updateInvoiceTotals, postInvoice, deleteInvoice, getInvoiceItems, upsertInvoiceItem, deleteInvoiceItem, getTraders, deleteTrader, getActiveDrivers, getAllSettings, openDriverSheet, getDriverAvailableInventory, transferInvoiceItemDriver } from "../lib/db.js";
 import { computeInvoiceItem, computeInvoiceTotals, fromInt, formatMoney } from "../lib/money.js";
 import { findOrCreateTrader, findOrCreateDriver } from "../lib/findOrCreate.js";
 import { SmallProductCombobox } from "../components/SmallProductCombobox.jsx";
+import SearchableDriverInput from "../components/SearchableDriverInput.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import { useDataContext } from "../context/DataContext.jsx";
+import { isFixedMaterial } from "../lib/materials.js";
 
 
 // ----------------------------------------------------------------------
@@ -51,7 +54,7 @@ const formatViewDateTime = (dateStr) => {
 // ----------------------------------------------------------------------
 // مكون حقل التعديل المباشر
 // ----------------------------------------------------------------------
-function DoubleTapEdit({ value, onSave, className = "" }) {
+function DoubleTapEdit({ value, onSave, className = "", disabled = false }) {
   const [edit, setEdit] = useState(false);
   const [val, setVal] = useState(value);
 
@@ -64,7 +67,7 @@ function DoubleTapEdit({ value, onSave, className = "" }) {
     if (val !== value) onSave(val);
   };
 
-  if (edit) {
+  if (edit && !disabled) {
     return (
       <div className="absolute inset-0 z-20 bg-background flex items-center p-0.5">
         <input
@@ -81,8 +84,8 @@ function DoubleTapEdit({ value, onSave, className = "" }) {
 
   return (
     <div
-      onDoubleClick={() => setEdit(true)}
-      className={`cursor-pointer hover:bg-primary/10 w-full h-full min-h-[30px] flex items-center text-[11px] font-sans font-extrabold transition-colors relative ${className}`}
+      onDoubleClick={() => !disabled && setEdit(true)}
+      className={`${disabled ? "cursor-not-allowed bg-muted text-muted-foreground" : "cursor-pointer hover:bg-primary/10"} w-full h-full min-h-[30px] flex items-center text-[11px] font-sans font-extrabold transition-colors relative ${className}`}
       title="انقر مرتين للتعديل"
     >
       {value}
@@ -90,15 +93,46 @@ function DoubleTapEdit({ value, onSave, className = "" }) {
   );
 }
 
+function DriverSelectEdit({ value, options, loading, onSave, className = "" }) {
+  const [editing, setEditing] = useState(false);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className={`cursor-pointer hover:bg-primary/10 w-full min-h-[30px] flex items-center text-[10px] font-bold transition-colors ${className}`}
+        title="اختيار سائق آخر"
+      >
+        {value}
+      </button>
+    );
+  }
+
+  return (
+    <SmallProductCombobox
+      items={options}
+      value=""
+      onChange={(id) => {
+        setEditing(false);
+        if (id) onSave(id);
+      }}
+      placeholder={loading ? "جار التحميل..." : options.length ? "اختر السائق" : "لا يوجد سائق مناسب"}
+    />
+  );
+}
+
 // ----------------------------------------------------------------------
 // المكون الرئيسي
 // ----------------------------------------------------------------------
 export default function Invoices() {
+  const { drivers, refreshData } = useDataContext();
   const [traders, setTraders] = useState([]);
   const [draftInvoices, setDraftInvoices] = useState([]);
   const [activeDrivers, setActiveDrivers] = useState([]);
-  const [allDrivers, setAllDrivers] = useState([]);
   const [driverInventory, setDriverInventory] = useState([]);
+  const [driverTransferOptions, setDriverTransferOptions] = useState({});
+  const [driverTransferLoading, setDriverTransferLoading] = useState(false);
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -137,6 +171,7 @@ export default function Invoices() {
   const [printInv, setPrintInv] = useState(null);
   const [printItems, setPrintItems] = useState([]);
   const inventoryRequestRef = useRef(0);
+  const addTraderInputRef = useRef(null);
   const [toast, setToast] = useState(null);
 
   const defaultCommission = Number(settings.default_commission ?? 0);
@@ -144,10 +179,11 @@ export default function Invoices() {
   const defaultBasketPrice = Number(settings.basket_price ?? 0) || 0;
   const defaultPorterage = Number(settings.porterage ?? 0) || 0;
   const marketName = settings.market_name || "مكتب الموصل";
+  const unpostedInvoiceCount = draftInvoices.filter(invoice => invoice.status !== "posted").length;
 
   const driverProductItems = useMemo(() => {
     return driverInventory
-      .filter(item => Number(item.basket_count) > 0)
+      .filter(item => Number(item.basket_count) > 0 || isFixedMaterial(item.product_name))
       .map(item => ({
         id: item.product_name,
         label: `${item.product_name} - ${item.basket_count} قطعة`,
@@ -169,12 +205,11 @@ export default function Invoices() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [allInv, tr, dr, allDr, st] = await Promise.all([
-        getInvoices(), getTraders(), getActiveDrivers(), getDrivers(), getAllSettings(),
+      const [allInv, tr, dr, st] = await Promise.all([
+        getInvoices(), getTraders(), getActiveDrivers(), getAllSettings(),
       ]);
       setTraders(tr);
       setActiveDrivers(dr);
-      setAllDrivers(allDr);
       setSettings(st);
 
       const drafts = allInv.filter(inv => inv.status === "draft");
@@ -231,6 +266,47 @@ export default function Invoices() {
     }
   }, [currentInvoice]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDriverTransferOptions() {
+      if (!currentInvoice || invoiceItems.length === 0 || activeDrivers.length === 0) {
+        setDriverTransferOptions({});
+        return;
+      }
+      setDriverTransferLoading(true);
+      try {
+        const inventories = await Promise.all(activeDrivers.map(async (driver) => [
+          driver.id,
+          await getDriverAvailableInventory(driver.id),
+        ]));
+        if (cancelled) return;
+        const inventoryByDriver = new Map(inventories);
+        const optionsByItem = Object.fromEntries(invoiceItems.map((item) => {
+          const options = activeDrivers
+            .filter(driver => String(driver.id) !== String(item.driver_id))
+            .filter(driver => {
+              const available = inventoryByDriver.get(driver.id) || [];
+              const stock = available.find(row => row.product_name === item.product_name);
+              return Number(stock?.basket_count || 0) >= Number(item.basket_count || 0);
+            })
+            .map(driver => ({
+              id: driver.id,
+              label: `${driver.driver_number || "بدون رقم"} - ${driver.name}`,
+            }));
+          return [item.id, options];
+        }));
+        setDriverTransferOptions(optionsByItem);
+      } catch (error) {
+        console.error("خطأ في تحميل خيارات نقل السائق:", error);
+        if (!cancelled) setDriverTransferOptions({});
+      } finally {
+        if (!cancelled) setDriverTransferLoading(false);
+      }
+    }
+    loadDriverTransferOptions();
+    return () => { cancelled = true; };
+  }, [currentInvoice, invoiceItems, activeDrivers]);
+
   const filteredTraders = useMemo(() => {
     let list = traders;
     if (searchTrader.trim()) {
@@ -259,6 +335,12 @@ export default function Invoices() {
 
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
+      if (e.key === "Control") {
+        e.preventDefault();
+        addTraderInputRef.current?.focus();
+        return;
+      }
+
       const activeTag = document.activeElement?.tagName;
       if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
       if (allFlattenedTraders.length === 0) return;
@@ -307,6 +389,7 @@ export default function Invoices() {
     if (!newTraderName.trim()) return;
     try {
       const id = await findOrCreateTrader(newTraderName.trim());
+      await refreshData();
       setNewTraderName("");
       await loadData();
       const updatedTraders = await getTraders();
@@ -366,25 +449,22 @@ export default function Invoices() {
     setNewItem({ ...newItem, [field]: formatNumberWithCommas(val.replace(/[^0-9.]/g,"")) });
   };
 
+  const isRagi = isFixedMaterial(newItem.product_name);
+
   function showToast(message) {
     setToast(message);
     window.setTimeout(() => setToast(null), 3500);
   }
 
-  const handleDriverNumberChange = useCallback(async (val) => {
-    const numStr = val.replace(/[^0-9]/g, "");
-    setNewItem(prev => ({ ...prev, driverNumber: numStr, driver_id: null, driver_label: "" }));
-    if (!numStr) return;
-    const driver = await getDriverByNumber(numStr);
-    if (driver) {
-      setNewItem(prev => ({
-        ...prev,
-        driverNumber: numStr,
-        driver_id: driver.id,
-        driver_label: driver.name,
-      }));
-    }
-  }, []);
+  const handleDriverChange = (driverId, typedValue = "") => {
+    const driver = drivers.find(item => String(item.id) === String(driverId));
+    setNewItem(prev => ({
+      ...prev,
+      driver_id: driver?.id || null,
+      driver_label: driver?.name || "",
+      driverNumber: driver?.driver_number?.toString() || typedValue,
+    }));
+  };
 
   async function handleAddNewItem(e) {
     e.preventDefault();
@@ -395,17 +475,17 @@ export default function Invoices() {
       let dId = newItem.driver_id;
       if (!dId && newItem.driver_label?.trim()) {
         const trimmed = newItem.driver_label.trim();
-        const existing = allDrivers.find(d => d.name.toLowerCase() === trimmed.toLowerCase());
+        const existing = drivers.find(d => d.name.toLowerCase() === trimmed.toLowerCase());
         if (existing) { dId = existing.id; await openDriverSheet(dId); }
-        else { dId = await findOrCreateDriver(trimmed); }
+        else { dId = await findOrCreateDriver(trimmed); await refreshData(); }
       }
 
       if (!dId) return showToast("الرجاء اختيار سائق لديه قائمة مفتوحة أولاً");
 
       const cleanGross = cleanCommas(newItem.grossWeight);
       const cleanPrice = cleanCommas(newItem.price);
-      const cleanBasketCount = cleanCommas(newItem.basketCount);
-      if (cleanBasketCount <= 0) return showToast("أدخل كمية بيع أكبر من صفر");
+      const cleanBasketCount = isRagi ? 0 : cleanCommas(newItem.basketCount);
+      if (!isRagi && cleanBasketCount <= 0) return showToast("أدخل كمية بيع أكبر من صفر");
       const latestInventory = await getDriverAvailableInventory(dId);
       const availableItem = latestInventory.find(item => item.product_name === newItem.product_name);
       if (!availableItem) return showToast("عدد القطع المتبقية أقل من الكمية المطلوبة");
@@ -426,7 +506,11 @@ export default function Invoices() {
       const computed = computeInvoiceItem({
         grossWeight: cleanGross, basketCount: cleanBasketCount, basketWeightEach: cleanBasketWt,
         price: cleanPrice, basketPrice: cleanBasketPrice, commissionRate: cleanCommRate,
-        porterage: cleanPortVal * cleanBasketCount, manualFinal: cleanManualFinal,
+        porterage: newItem.porterage !== ""
+          ? cleanPortVal
+          : cleanPortVal * cleanBasketCount,
+        manualFinal: cleanManualFinal,
+        productName: newItem.product_name,
       });
 
       await upsertInvoiceItem({
@@ -481,8 +565,11 @@ export default function Invoices() {
       const computed = computeInvoiceItem({
         ...overrides,
         basketPrice: fromInt(itemToUpdate.basket_price || defaultBasketPrice),
-        porterage: overrides.porterage * overrides.basketCount,
+        porterage: field === "porterage"
+          ? overrides.porterage
+          : overrides.porterage * overrides.basketCount,
         manualFinal: null,
+        productName: itemToUpdate.product_name,
       });
 
       await upsertInvoiceItem({ ...computed, id: itemId, invoice_id: currentInvoice.id, product_name: itemToUpdate.product_name, driver_id: itemToUpdate.driver_id });
@@ -505,51 +592,13 @@ export default function Invoices() {
     }
   }
 
-  async function handleDriverEdit(itemId, newDriverName) {
-    if (!currentInvoice) return;
+  async function handleDriverTransfer(itemId, newDriverId) {
     try {
-      const itemToUpdate = invoiceItems.find(it => it.id === itemId);
-      if (!itemToUpdate) return;
-
-      let dId = null;
-      const trimmed = newDriverName ? newDriverName.trim().replace(/^—$/, "") : "";
-
-      if (trimmed !== "") {
-        const existing = allDrivers.find(d => d.name.toLowerCase() === trimmed.toLowerCase());
-        if (existing) {
-          dId = existing.id;
-        } else {
-          dId = await findOrCreateDriver(trimmed);
-        }
-      }
-
-      const overrides = {
-        grossWeight: fromInt(itemToUpdate.gross_weight),
-        basketCount: itemToUpdate.basket_count,
-        price: fromInt(itemToUpdate.price),
-        commissionRate: fromInt(itemToUpdate.commission_rate),
-        porterage: itemToUpdate.basket_count ? fromInt(itemToUpdate.porterage)/itemToUpdate.basket_count : defaultPorterage,
-        basketWeightEach: itemToUpdate.basket_weight_each || defaultBasketWeightEach,
-      };
-
-      const computed = computeInvoiceItem({
-        ...overrides,
-        basketPrice: fromInt(itemToUpdate.basket_price || defaultBasketPrice),
-        porterage: overrides.porterage * overrides.basketCount,
-        manualFinal: fromInt(itemToUpdate.final_amount),
-      });
-
-      await upsertInvoiceItem({
-        ...computed,
-        id: itemId,
-        invoice_id: currentInvoice.id,
-        product_name: itemToUpdate.product_name,
-        driver_id: dId
-      });
-
+      await transferInvoiceItemDriver(itemId, newDriverId);
       await loadData();
-    } catch (e) {
-      alert("خطأ في تحديث السائق");
+      setToast("تم نقل البند وتحديث مخزون السائقين");
+    } catch (error) {
+      showToast(error.message || "تعذر نقل البند إلى السائق الجديد");
     }
   }
 
@@ -700,7 +749,7 @@ export default function Invoices() {
               <User size={15} /> البگاكيل
             </h3>
             <form onSubmit={handleAddTrader} className="flex gap-1 mb-2">
-              <input value={newTraderName} onChange={(e) => setNewTraderName(e.target.value)} placeholder="إضافة بگال جديد..." className="flex-1 rounded border-2 border-slate-300 bg-background px-2 py-1 h-7 text-[11px] font-bold text-slate-900 outline-none focus:border-primary" />
+              <input ref={addTraderInputRef} value={newTraderName} onChange={(e) => setNewTraderName(e.target.value)} placeholder="إضافة بگال جديد..." className="flex-1 rounded border-2 border-slate-300 bg-background px-2 py-1 h-7 text-[11px] font-bold text-slate-900 outline-none focus:border-primary" />
               <button type="submit" disabled={!newTraderName.trim()} className="bg-primary text-primary-foreground h-7 w-7 rounded flex items-center justify-center disabled:opacity-50 font-bold">
                 <Plus size={15} />
               </button>
@@ -793,6 +842,19 @@ export default function Invoices() {
                     >
                       <Trash2 size={13} />
                     </button>
+                    <button
+                      type="button"
+                      onClick={(event) => togglePinTrader(event, selectedTrader.id)}
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold transition-colors ${
+                        pinnedTraderIds.includes(selectedTrader.id)
+                          ? "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                          : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                      }`}
+                      title={pinnedTraderIds.includes(selectedTrader.id) ? "إزالة من الدائمين" : "إضافة للدائمين"}
+                    >
+                      <Pin size={11} className={pinnedTraderIds.includes(selectedTrader.id) ? "fill-current" : ""} />
+                      {pinnedTraderIds.includes(selectedTrader.id) ? "إزالة من الدائمين" : "إضافة للدائمين"}
+                    </button>
                   </>
                 ) : (
                   "اختر بگال من القائمة الجانبية للبدء"
@@ -801,10 +863,10 @@ export default function Invoices() {
               <button
                 type="button"
                 onClick={() => setConfirmPostAll(true)}
-                disabled={draftInvoices.length === 0}
+                disabled={unpostedInvoiceCount === 0}
                 className="flex items-center gap-1 bg-green-700 hover:bg-green-800 disabled:opacity-40 text-white font-extrabold text-[11px] px-2.5 h-6 rounded shadow transition-colors"
               >
-                <Send size={12} /> ترحيل الكل ({draftInvoices.length})
+                <Send size={12} /> ترحيل الكل ({unpostedInvoiceCount})
               </button>
             </div>
 
@@ -816,13 +878,11 @@ export default function Invoices() {
               <div className="grid grid-cols-8 gap-2 items-end">
                 <div className="col-span-1">
                   <label className={labelClass}># رقم السائق</label>
-                  <input
-                    type="text"
+                  <SearchableDriverInput
+                    drivers={drivers}
                     value={newItem.driverNumber}
-                    onChange={(e) => handleDriverNumberChange(e.target.value)}
-                    className={`${textInputClass} text-center font-extrabold text-primary placeholder:text-slate-400`}
-                    placeholder="٠"
-                    maxLength={4}
+                    onChange={(id, typedValue) => handleDriverChange(id, typedValue)}
+                    placeholder="ابحث عن رقم السائق"
                   />
                 </div>
                 <div className="col-span-3">
@@ -834,7 +894,7 @@ export default function Invoices() {
                     items={activeDriverItems}
                     value={newItem.driver_label || ""}
                     onChange={(id, label) => {
-                      const driver = allDrivers.find(d => String(d.id) === String(id));
+                      const driver = drivers.find(d => String(d.id) === String(id));
                       setNewItem(prev => ({ ...prev, driver_id: id, driver_label: label, driverNumber: driver?.driver_number?.toString() || prev.driverNumber }));
                     }}
                     onFocus={refreshOpenDrivers}
@@ -846,7 +906,13 @@ export default function Invoices() {
                   <SmallProductCombobox
                     items={driverProductItems}
                     value={newItem.product_name}
-                    onChange={(id) => setNewItem(prev => ({ ...prev, product_name: id }))}
+                    onChange={(id) => setNewItem(prev => ({
+                      ...prev,
+                      product_name: id,
+                      basketCount: isFixedMaterial(id) ? "0" : prev.basketCount,
+                      basketPrice: isFixedMaterial(id) ? "0" : prev.basketPrice,
+                      porterage: isFixedMaterial(id) ? "15" : String(defaultPorterage),
+                    }))}
                     placeholder={newItem.driver_id ? "بحث مادة السائق..." : "اختر السائق أولاً..."}
                   />
                 </div>
@@ -864,14 +930,14 @@ export default function Invoices() {
                 </div>
                 <div>
                   <label className={labelClass}>العدد</label>
-                  <input type="text" value={newItem.basketCount} onChange={(e) => handleNewItemChange('basketCount', e.target.value)} className={textInputClass} placeholder="0" />
+                  <input type="text" value={isRagi ? "0" : newItem.basketCount} disabled={isRagi} onChange={(e) => handleNewItemChange('basketCount', e.target.value)} className={`${textInputClass} ${isRagi ? "bg-muted text-muted-foreground cursor-not-allowed" : ""}`} placeholder="0" />
                 </div>
                 <div>
                   <label className={labelClass}>سعر السلة</label>
-                  <input type="text" value={newItem.basketPrice} onChange={(e) => handleNewItemChange('basketPrice', e.target.value)} className={textInputClass} placeholder={`${defaultBasketPrice}`} />
+                  <input type="text" value={isRagi ? "0" : newItem.basketPrice} disabled={isRagi} onChange={(e) => handleNewItemChange('basketPrice', e.target.value)} className={`${textInputClass} ${isRagi ? "bg-muted text-muted-foreground cursor-not-allowed" : ""}`} placeholder={`${defaultBasketPrice}`} />
                 </div>
                 <div>
-                  <label className={labelClass}>حمالية/سلة</label>
+                  <label className={labelClass}>{isRagi ? "حمالية / كيلو" : "حمالية / قطعة"}</label>
                   <input type="text" value={newItem.porterage} onChange={(e) => handleNewItemChange('porterage', e.target.value)} className={textInputClass} placeholder={`${defaultPorterage}`} />
                 </div>
                 <div>
@@ -908,7 +974,9 @@ export default function Invoices() {
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300">العدد</th>
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300">السعر</th>
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300">العمولة %</th>
-                        <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300 hidden md:table-cell">حمالية/سلة</th>
+                        <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300 hidden md:table-cell">
+                          {invoiceItems.some(item => isFixedMaterial(item.product_name)) ? "حمالية" : "حمالية/قطعة"}
+                        </th>
                         <th className="py-2.5 px-1 font-extrabold text-slate-800 border-r-2 border-slate-300 bg-slate-300/50">الصافي</th>
                         <th className="py-2.5 px-1 font-extrabold text-primary border-r-2 border-slate-300 bg-primary/10">النهائي</th>
                         <th className="py-2.5 px-1 w-6"></th>
@@ -920,9 +988,11 @@ export default function Invoices() {
                           <td className="py-2 px-1 text-right">
                             <div className="font-extrabold text-slate-900 truncate max-w-[120px]">{it.product_name}</div>
                             <div className="max-w-[120px]">
-                              <DoubleTapEdit
+                              <DriverSelectEdit
                                 value={it.driver_name || "—"}
-                                onSave={(v) => handleDriverEdit(it.id, v)}
+                                options={driverTransferOptions[it.id] || []}
+                                loading={driverTransferLoading}
+                                onSave={(v) => handleDriverTransfer(it.id, v)}
                                 className="text-[10px] font-bold text-slate-500 justify-start px-0.5 text-right w-full"
                               />
                             </div>
@@ -931,7 +1001,7 @@ export default function Invoices() {
                             <DoubleTapEdit value={formatNumberWithCommas(fromInt(it.gross_weight))} onSave={(v) => handleInlineEdit(it.id, 'gross_weight', v)} />
                           </td>
                           <td className="border-r-2 border-slate-200 p-0 relative h-[34px]">
-                            <DoubleTapEdit value={formatNumberWithCommas(it.basket_count)} onSave={(v) => handleInlineEdit(it.id, 'basket_count', v)} />
+                            <DoubleTapEdit value={isFixedMaterial(it.product_name) ? "0" : formatNumberWithCommas(it.basket_count)} disabled={isFixedMaterial(it.product_name)} onSave={(v) => handleInlineEdit(it.id, 'basket_count', v)} />
                           </td>
                           <td className="border-r-2 border-slate-200 p-0 relative h-[34px]">
                             <DoubleTapEdit value={formatNumberWithCommas(fromInt(it.price))} onSave={(v) => handleInlineEdit(it.id, 'price', v)} className="text-slate-900 font-extrabold" />
@@ -940,7 +1010,7 @@ export default function Invoices() {
                             <DoubleTapEdit value={formatNumberWithCommas(fromInt(it.commission_rate))} onSave={(v) => handleInlineEdit(it.id, 'commission_rate', v)} className="text-slate-900 font-extrabold" />
                           </td>
                           <td className="border-r-2 border-slate-200 p-0 relative h-[34px] hidden md:table-cell">
-                            <DoubleTapEdit value={formatNumberWithCommas(it.basket_count ? fromInt(it.porterage)/it.basket_count : defaultPorterage)} onSave={(v) => handleInlineEdit(it.id, 'porterage', v)} />
+                            <DoubleTapEdit value={formatNumberWithCommas(fromInt(it.porterage))} onSave={(v) => handleInlineEdit(it.id, 'porterage', v)} />
                           </td>
                           <td className="border-r-2 border-slate-200 p-1 bg-slate-100 font-sans font-bold text-slate-800">{formatMoney(fromInt(it.net_weight), "")}</td>
                           <td className="border-r-2 border-slate-200 p-1 bg-primary/5 font-sans font-extrabold text-primary text-[13px]">{formatMoney(fromInt(it.final_amount), "")}</td>
@@ -1152,7 +1222,7 @@ export default function Invoices() {
       />
       <ConfirmDialog
         open={confirmPostAll} title="ترحيل كل القوائم"
-        message={`هل أنت متأكد من ترحيل جميع القوائم المعلقة (${draftInvoices.length} قائمة)؟`}
+        message={`هل أنت متأكد من ترحيل جميع القوائم المعلقة (${unpostedInvoiceCount} قائمة)؟`}
         confirmText="ترحيل الكل" onConfirm={handlePostAllInvoices} onCancel={() => setConfirmPostAll(false)}
       />
       <ConfirmDialog

@@ -6,7 +6,8 @@ import {
   ScrollText,
   BarChart2,
   Settings,
-  CreditCard,  
+  CreditCard,
+  Wallet,
 } from "lucide-react";
 
 
@@ -15,6 +16,7 @@ const navItems = [
   { to: "/traders",  label: "البگاگيل",          icon: Users },
   { to: "/debts",    label: "الديون",           icon: CreditCard }, 
   { to: "/drivers",  label: "السواق",          icon: UserCheck },
+  { to: "/withdrawals", label: "السحوبات",      icon: Wallet },
   { to: "/transactions", label: "سجل المعاملات",   icon: ScrollText },
   { to: "/reports",  label: "التقارير",         icon: BarChart2 },
   { to: "/settings", label: "الإعدادات",        icon: Settings },

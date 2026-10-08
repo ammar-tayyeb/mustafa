@@ -5,11 +5,13 @@ import { getTraders, createTrader, updateTrader, deleteTrader, createManualDebtI
 import { formatMoney, toInt } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import { useDataContext } from "../context/DataContext.jsx";
 
 const EMPTY_FORM = { name: "", phone: "", notes: "" };
 const EMPTY_DEBT = { amount: "", date: new Date().toISOString().slice(0, 10), productName: "", notes: "" };
 
 export default function Traders() {
+  const { refreshData } = useDataContext();
   const [traders, setTraders]       = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
@@ -63,6 +65,7 @@ export default function Traders() {
       else await createTrader(form);
       setShowForm(false);
       await load();
+      await refreshData();
     } catch (e) {
       alert("خطأ: " + (e?.message || String(e) || "خطأ غير معروف"));
     } finally {

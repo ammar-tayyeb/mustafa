@@ -40,6 +40,7 @@ export function formatWeight(intVal) {
 export function computeInvoiceItem({
   grossWeight = 0, basketCount = 0, basketWeightEach = 0.5,
   price = 0, basketPrice = 0, commissionRate = 0, porterage = 0, manualFinal = null,
+  productName = "",
 }) {
   const grossW = Number(grossWeight) || 0;
   const bCount = Number(basketCount) || 0;
@@ -47,7 +48,9 @@ export function computeInvoiceItem({
   const priceI = Number(price) || 0;
   const basketPriceI = Number(basketPrice) || 0;
   const commRate = Number(commissionRate) || 0;
-  const porterageI = toInt(porterage);
+  const porterageI = productName === "الرگي"
+    ? Math.round(grossW * 15)
+    : toInt(porterage);
 
   const netWeight = grossW - (bCount * bWeight);
   const amountBefore = Math.round(netWeight * priceI);

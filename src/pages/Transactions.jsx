@@ -1,7 +1,7 @@
 import { Trash2, RotateCcw, CheckCircle, Printer, Plus } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
-import { getInvoices, postInvoice, reverseInvoice, deleteInvoice, getInvoiceItems, getAllSettings, } from "../lib/db.js";
+import { getInvoices, getTransactions, getWithdrawals, postInvoice, reverseInvoice, deleteInvoice, getInvoiceItems, getAllSettings, getDrivers } from "../lib/db.js";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import { fromInt, formatMoney } from "../lib/money.js";
 import DataTable from "../components/DataTable.jsx";
@@ -9,9 +9,12 @@ import DataTable from "../components/DataTable.jsx";
 
 export default function Transactions() {
   const [invoices, setInvoices] = useState([]);
+  const [transactionLog, setTransactionLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [marketName, setMarketName] = useState("مكتب الموصل");
+  const [driverSearchTerm, setDriverSearchTerm] = useState("");
+  const [merchantSearchTerm, setMerchantSearchTerm] = useState("");
 
   const [viewInv, setViewInv] = useState(null);
   const [viewItems, setViewItems] = useState([]);
@@ -24,11 +27,46 @@ export default function Transactions() {
     try {
       setLoading(true);
       setError(null);
-      const [inv, st] = await Promise.all([
+      const [inv, st, drivers, transactions, withdrawals] = await Promise.all([
         getInvoices(),
         getAllSettings(),
+        getDrivers(),
+        getTransactions(),
+        getWithdrawals(),
       ]);
-      setInvoices(inv);
+
+      const driversMap = new Map(drivers.map(d => [String(d.id), d.name]));
+
+      // استخراج اسم السائق المحدّث من بنود كل فاتورة
+      const enriched = await Promise.all(
+        inv.map(async (invoice) => {
+          const items = await getInvoiceItems(invoice.id);
+          const names = new Set();
+
+          for (const it of items) {
+            if (!it.driver_id) continue;
+            const name = driversMap.get(String(it.driver_id)) || it.driver_name;
+            if (name) names.add(name);
+          }
+
+          // احتياط: إذا لا توجد بنود بسائق، نستخدم driver_id الخاص بالفاتورة
+          if (names.size === 0 && invoice.driver_id) {
+            const name = driversMap.get(String(invoice.driver_id)) || invoice.driver_name;
+            if (name) names.add(name);
+          }
+
+          return {
+            ...invoice,
+            driver_name: names.size ? Array.from(names).join("، ") : null,
+          };
+        })
+      );
+
+      setInvoices(enriched);
+      setTransactionLog(transactions.map(transaction => ({
+        ...transaction,
+        withdrawal: withdrawals.find(withdrawal => withdrawal.id === transaction.ref_id) || null,
+      })));
       if (st?.market_name) setMarketName(st.market_name);
     } catch (e) {
       console.error("خطأ في التحميل:", e);
@@ -41,6 +79,60 @@ export default function Transactions() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const unifiedLogs = useMemo(() => {
+    const mappedInvoices = invoices.map(invoice => ({
+      id: `invoice-${invoice.id}`,
+      date: invoice.date,
+      type: "فاتورة مبيعات",
+      details: [invoice.trader_name, invoice.driver_name].filter(Boolean).join(" / ") || "—",
+      merchantName: invoice.trader_name || "",
+      driverName: invoice.driver_name || "",
+      personType: invoice.trader_name ? "merchant" : invoice.driver_name ? "driver" : null,
+      personTypes: [invoice.trader_name && "merchant", invoice.driver_name && "driver"].filter(Boolean),
+      amount: Number(invoice.total_final || 0),
+      source: "invoice",
+      sourceRecord: invoice,
+    }));
+
+    const mappedTransactions = transactionLog.map(transaction => ({
+      id: `transaction-${transaction.id}`,
+      date: transaction.date || transaction.created_at,
+      type: transaction.type === "debt_withdrawal_settlement"
+        ? "تسديد دين سحب"
+        : transaction.type === "payment"
+          ? "تسديد دين"
+          : transaction.type === "withdrawal"
+            ? "سحب"
+            : transaction.type || "معاملة مالية",
+      details: transaction.withdrawal?.personName || transaction.description || transaction.trader_name || "—",
+      merchantName: transaction.withdrawal?.personType === "grocer" || transaction.trader_id ? (transaction.trader_name || transaction.withdrawal?.personName || "") : "",
+      driverName: transaction.withdrawal?.personType === "driver" ? (transaction.withdrawal?.personName || "") : "",
+      personType: transaction.withdrawal?.personType === "driver" || (!transaction.trader_id && transaction.type === "debt_withdrawal_settlement") ? "driver" : transaction.trader_id ? "merchant" : null,
+      personTypes: transaction.withdrawal?.personType === "driver" || (!transaction.trader_id && transaction.type === "debt_withdrawal_settlement") ? ["driver"] : transaction.trader_id ? ["merchant"] : [],
+      amount: Number(transaction.amount || 0),
+      source: "transaction",
+      sourceRecord: transaction,
+    }));
+
+    return [...mappedInvoices, ...mappedTransactions]
+      .sort((a, b) => {
+        const aTime = new Date(a.date || 0).getTime();
+        const bTime = new Date(b.date || 0).getTime();
+        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+      });
+  }, [invoices, transactionLog]);
+
+  const filteredUnifiedLogs = useMemo(() => {
+    const driverQuery = driverSearchTerm.trim().toLowerCase();
+    const merchantQuery = merchantSearchTerm.trim().toLowerCase();
+
+    return unifiedLogs.filter(log => {
+      if (driverQuery) return log.personTypes.includes("driver") && log.driverName.toLowerCase().includes(driverQuery);
+      if (merchantQuery) return log.personTypes.includes("merchant") && log.merchantName.toLowerCase().includes(merchantQuery);
+      return true;
+    });
+  }, [unifiedLogs, driverSearchTerm, merchantSearchTerm]);
 
   async function handlePrintDirectly(inv) {
     const its = await getInvoiceItems(inv.id);
@@ -132,68 +224,38 @@ export default function Transactions() {
       render: (row) => renderTableDateTime(row.date),
     },
     {
-      key: "trader_name",
-      label: "البگال",
+      key: "type",
+      label: "نوع الحركة",
+      render: (row) => (
+        <span className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-semibold ${row.source === "invoice" ? "bg-blue-100 text-blue-700" : row.type.includes("تسديد") ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+          {row.type}
+        </span>
+      ),
+    },
+    {
+      key: "driverName",
+      label: "اسم السائق",
       render: (row) => (
         <span className="text-[12px] font-semibold truncate max-w-[110px] block px-0.5">
-          {row.trader_name}
+          {row.driverName || "-"}
         </span>
       ),
     },
     {
-      key: "driver_name",
-      label: "السائق",
+      key: "merchantName",
+      label: "اسم البقال",
       render: (row) => (
         <span className="text-[12px] font-semibold truncate max-w-[110px] block px-0.5">
-          {row.driver_name || "سائق غير معروف"}
+          {row.merchantName || "-"}
         </span>
       ),
     },
     {
-      key: "status",
-      label: "الحالة",
-      render: (row) => (
-        <span
-          className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-            row.status === "posted"
-              ? "bg-green-100 text-green-700"
-              : "bg-yellow-100 text-yellow-700"
-          }`}
-        >
-          {row.status === "posted" ? "مرحل" : "مسودة"}
-        </span>
-      ),
-    },
-    {
-      key: "total_final",
-      label: "الإجمالي",
+      key: "amount",
+      label: "المبلغ",
       render: (row) => (
         <span className="font-sans font-bold text-[12px] px-0.5 text-primary">
-          {formatMoney(row.total_final)}
-        </span>
-      ),
-    },
-    {
-      key: "paid_amount",
-      label: "الواصل",
-      render: (row) => (
-        <span className="font-sans font-semibold text-[12px] text-emerald-600 px-0.5">
-          {formatMoney(row.paid_amount)}
-        </span>
-      ),
-    },
-    {
-      key: "remaining",
-      label: "الباقي",
-      render: (row) => (
-        <span
-          className={`font-sans text-[12px] px-0.5 ${
-            row.remaining > 0
-              ? "text-destructive font-bold"
-              : "text-muted-foreground font-medium"
-          }`}
-        >
-          {formatMoney(row.remaining)}
+          {formatMoney(row.amount)}
         </span>
       ),
     },
@@ -224,12 +286,35 @@ export default function Transactions() {
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-border/50 pb-2 no-print">
         <div>
-          <h2 className="text-base font-bold">سجل الفواتير والمبيعات</h2>
-          <p className="text-[11px] text-muted-foreground mt-0.5">عرض وإدارة القوائم المرحلة والمسودات</p>
+          <h2 className="text-base font-bold">سجل الحركات الموحد</h2>
+          <p className="text-[11px] text-muted-foreground mt-0.5">الفواتير والمعاملات المالية مرتبة زمنياً</p>
         </div>
       </div>
 
       <div className="flex flex-col gap-1 max-w-full overflow-x-auto no-print">
+        <div className="mb-2 flex gap-4">
+          <input
+            type="text"
+            value={driverSearchTerm}
+            onChange={(event) => {
+              setDriverSearchTerm(event.target.value);
+              setMerchantSearchTerm("");
+            }}
+            placeholder="بحث عن سائق..."
+            className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+          />
+          <input
+            type="text"
+            value={merchantSearchTerm}
+            onChange={(event) => {
+              setMerchantSearchTerm(event.target.value);
+              setDriverSearchTerm("");
+            }}
+            placeholder="بحث عن بقال..."
+            className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
         {error && (
           <div className="rounded-md bg-destructive/10 text-destructive px-3 py-1.5 text-[11px]">
             {error}
@@ -244,53 +329,55 @@ export default function Transactions() {
           <div className="p-0.5">
             <DataTable
               columns={columns}
-              data={invoices}
-              searchKeys={["trader_name", "date", "notes"]}
-              emptyText="لا توجد مبيعات مسجلة"
+              data={filteredUnifiedLogs}
+              searchKeys={["type", "details", "date", "amount"]}
+              emptyText="لا توجد حركات مسجلة"
               actions={(row) => (
-                <div className="flex items-center gap-0.5">
-                  <button
-                    onClick={() => handlePrintDirectly(row)}
-                    title="طباعة"
-                    className="p-1 rounded hover:bg-accent text-primary"
-                  >
-                    <Printer size={14} />
-                  </button>
-                  {row.status === "draft" && (
-                    <>
-                      <button
-                        onClick={() => alert("للتعديل يرجى الانتقال إلى صفحة إدخال الفواتير")}
-                        title="تعديل"
-                        className="p-1 rounded hover:bg-accent text-primary"
-                      >
-                        <Plus size={14} />
-                      </button>
-                      <button
-                        onClick={() => setConfirmPost(row)}
-                        title="ترحيل"
-                        className="p-1 rounded hover:bg-accent text-green-600"
-                      >
-                        <CheckCircle size={14} />
-                      </button>
-                      <button
-                        onClick={() => setConfirmDelete(row)}
-                        title="حذف"
-                        className="p-1 rounded hover:bg-accent text-destructive"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </>
-                  )}
-                  {row.status === "posted" && (
+                row.source !== "invoice" ? null : (
+                  <div className="flex items-center gap-0.5">
                     <button
-                      onClick={() => setConfirmReverse(row)}
-                      title="عكس القائمة"
-                      className="p-1 rounded hover:bg-accent text-orange-500"
+                      onClick={() => handlePrintDirectly(row.sourceRecord)}
+                      title="طباعة"
+                      className="p-1 rounded hover:bg-accent text-primary"
                     >
-                      <RotateCcw size={14} />
+                      <Printer size={14} />
                     </button>
-                  )}
-                </div>
+                    {row.sourceRecord.status === "draft" && (
+                      <>
+                        <button
+                          onClick={() => alert("للتعديل يرجى الانتقال إلى صفحة إدخال الفواتير")}
+                          title="تعديل"
+                          className="p-1 rounded hover:bg-accent text-primary"
+                        >
+                          <Plus size={14} />
+                        </button>
+                        <button
+                          onClick={() => setConfirmPost(row.sourceRecord)}
+                          title="ترحيل"
+                          className="p-1 rounded hover:bg-accent text-green-600"
+                        >
+                          <CheckCircle size={14} />
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(row.sourceRecord)}
+                          title="حذف"
+                          className="p-1 rounded hover:bg-accent text-destructive"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
+                    {row.sourceRecord.status === "posted" && (
+                      <button
+                        onClick={() => setConfirmReverse(row.sourceRecord)}
+                        title="عكس القائمة"
+                        className="p-1 rounded hover:bg-accent text-orange-500"
+                      >
+                        <RotateCcw size={14} />
+                      </button>
+                    )}
+                  </div>
+                )
               )}
             />
           </div>

@@ -69,4 +69,39 @@ describe('money helpers', () => {
     expect(item.commission_value).toBe(1000);
     expect(item.display.commissionValue).toBe(1000);
   });
+
+  it('uses percentage commission for الرگي like every other material', () => {
+    const item = computeInvoiceItem({
+      productName: 'الرگي',
+      grossWeight: 20,
+      basketCount: 0,
+      price: 1000,
+      commissionRate: 50,
+    });
+
+    expect(item.commission_value).toBe(10000);
+  });
+
+  it('uses weight-based porterage for الرگي', () => {
+    const item = computeInvoiceItem({
+      productName: 'الرگي',
+      grossWeight: 20,
+      basketCount: 0,
+      basketPrice: 999,
+      porterage: 1,
+    });
+
+    expect(item.porterage).toBe(300);
+  });
+
+  it('keeps a manually entered porterage amount instead of multiplying it again', () => {
+    const item = computeInvoiceItem({
+      productName: 'تفاح',
+      grossWeight: 20,
+      basketCount: 0,
+      porterage: 250,
+    });
+
+    expect(item.porterage).toBe(250);
+  });
 });

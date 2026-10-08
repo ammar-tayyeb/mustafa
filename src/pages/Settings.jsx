@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Save, HardDrive, ShieldCheck, AlertCircle, Plus, Trash2 } from "lucide-react";
 import { getAllSettings, setSetting, isTauriRuntime } from "../lib/db.js";
+import { DEFAULT_MATERIALS, FIXED_MATERIAL_NAME, isFixedMaterial } from "../lib/materials.js";
 
 export default function Settings() {
   const [loading, setLoading]   = useState(true);
@@ -41,6 +42,7 @@ export default function Settings() {
       const prodList = s.products_list ?? "";
       setProductsList(prodList);
       const prodArray = prodList.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+      if (!prodArray.includes(FIXED_MATERIAL_NAME)) prodArray.unshift(FIXED_MATERIAL_NAME);
       setProducts(prodArray);
     } catch (e) { 
       setError(e.message); 
@@ -63,6 +65,7 @@ export default function Settings() {
   };
 
   const handleRemoveProduct = (index) => {
+    if (isFixedMaterial(products[index])) return;
     const updated = products.filter((_, i) => i !== index);
     setProducts(updated);
   };
@@ -89,7 +92,11 @@ export default function Settings() {
       await setSetting("basket_weight", parsedBasketWeight);
       await setSetting("basket_price", parsedBasketPrice);
       await setSetting("porterage", parsedPorterage);
-      await setSetting("products_list", products.join('\n'));
+      const normalizedProducts = [
+        ...DEFAULT_MATERIALS.map(material => material.name),
+        ...products.filter(product => !isFixedMaterial(product)),
+      ];
+      await setSetting("products_list", [...new Set(normalizedProducts)].join('\n'));
       
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -235,13 +242,15 @@ export default function Settings() {
                   products.map((product, idx) => (
                     <div key={idx} className="flex items-center justify-between bg-muted/40 px-3 py-2 rounded-lg border border-border/30">
                       <span className="text-sm font-medium">{product}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveProduct(idx)}
-                        className="text-destructive hover:text-destructive/80 transition-colors p-1"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {!isFixedMaterial(product) && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveProduct(idx)}
+                          className="text-destructive hover:text-destructive/80 transition-colors p-1"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   ))
                 )}

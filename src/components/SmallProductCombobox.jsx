@@ -57,8 +57,8 @@ export function SmallProductCombobox({
         setSelectedIndex((prev) => (prev > 0 ? prev - 1 : -1));
         break;
       case "Enter":
-        e.preventDefault();
         if (selectedIndex >= 0 && filtered[selectedIndex]) {
+          e.preventDefault();
           handleSelect(filtered[selectedIndex]);
         }
         break;
@@ -99,7 +99,7 @@ export function SmallProductCombobox({
         <input
           ref={inputRef}
           type="text"
-          value={search}
+          value={search || value}
           onChange={(e) => {
             setSearch(e.target.value);
             setOpen(true);
@@ -129,10 +129,10 @@ export function SmallProductCombobox({
 
       {/* القائمة المنسدلة */}
       {open && filtered.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded shadow-lg z-50 max-h-40 overflow-y-auto">
+        <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto top-full left-0 right-0 mt-1">
           {filtered.map((item, idx) => (
-            <button
-              key={item.id}
+            <li key={item.id}>
+              <button
               type="button"
               onClick={() => handleSelect(item)}
               onMouseEnter={() => setSelectedIndex(idx)}
@@ -145,14 +145,15 @@ export function SmallProductCombobox({
               }`}
             >
               {item.label}
-            </button>
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
       {/* حالة "لا توجد نتائج" */}
       {open && search && filtered.length === 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded shadow-lg z-50 p-2 text-[10px] text-muted-foreground text-center">
+        <div className="absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto top-full left-0 right-0 mt-1 p-2 text-[10px] text-muted-foreground text-center">
           لا توجد نتائج لـ "{search}"
         </div>
       )}
